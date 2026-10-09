@@ -1,21 +1,14 @@
-# The golden-set eval: a fast SQL-accuracy run on
-# pull requests that can change an answer, the full five scores nightly.
+# The golden-set eval, run by hand: Actions -> eval -> Run workflow, or
+# `gh workflow run eval.yml`. Never on a schedule or a pull request: each run
+# is about $3 of model calls.
 #
 # Spends real money and reads the real warehouse, so it needs two repository
 # secrets: ANTHROPIC_API_KEY, and SNOWFLAKE_PRIVATE_KEY (the PEM text of
-# ~/.snowflake/citypulse/ro_rsa_key.p8). Without them -- a fork's pull
-# request, or a repository not set up yet -- the job says so and passes.
+# ~/.snowflake/citypulse/ro_rsa_key.p8). Without them the job says so and
+# passes.
 name: eval
 
 on:
-  pull_request:
-    paths:
-      - "data/**"
-      - "agent_app/**"
-      - "api/**"
-      - ".env.defaults"
-  schedule:
-    - cron: "0 9 * * *" # 09:00 UTC, after the US working day
   workflow_dispatch:
     inputs:
       cases:
@@ -38,8 +31,8 @@ jobs:
     env:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       SNOWFLAKE_PRIVATE_KEY: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
-      # Pull requests get the quick run: result matching only, no judge.
-      JUDGE: ${{ github.event_name == 'pull_request' && 'false' || (github.event_name == 'workflow_dispatch' && inputs.judge == false && 'false') || 'true' }}
+      # Unticking "judge" gives the quick run: result matching only.
+      JUDGE: ${{ inputs.judge == false && 'false' || 'true' }}
       CASES: ${{ inputs.cases }}
     steps:
       - name: Check the secrets are set
