@@ -1,0 +1,46 @@
+# 311 Analytics Agent (CityPulse 311 Lens)
+
+## What it is
+
+311 Analytics Agent is a BI agent that answers natural-language questions about 311 service requests, backed by a Snowflake warehouse. It is built for the people who run 311 operations and the analysts who support them. Instead of writing SQL, they ask in plain English, such as "Which cities breached SLA most often last month?", and get an answer in seconds: a table or chart where it helps, plus a short note on exactly how each number was computed. The warehouse holds 23 tables and about 11 million rows of synthetic data covering 120 North American cities and counties.
+
+Live demo: https://citypulse-311-lens.vercel.app (GitHub sign-in)
+
+## Run it
+
+You need an Anthropic API key and a warehouse of your own: Snowflake, or PostgreSQL with `WAREHOUSE=postgres`. The dataset itself is not in this repository. AWS and Vercel accounts are only needed to deploy.
+
+```bash
+git clone https://github.com/chenziliang1/311-analytics-agent && cd 311-analytics-agent
+mise run inst                # Python (uv) + Node (pnpm) dependencies
+cp .env.example .env         # then fill in ANTHROPIC_API_KEY
+mise run dev                 # http://localhost:3000
+```
+
+`mise run test` runs the whole test suite with no accounts at all. `mise run snowflake-load` loads the data into Snowflake, and `mise run infra-deploy` ships the agent to AWS Bedrock AgentCore. `mise run cli-grade` scores the agent on the golden set; it calls the model, so it costs money.
+
+## How it works
+
+```
+Browser (Next.js on Vercel) -> agent runtime (AgentCore) -> MCP tools runtime (AgentCore) -> Snowflake
+```
+
+- **Chat UI:** Next.js on Vercel. GitHub sign-in, live progress while a turn runs, CSV download for long results, and thumbs up or down on every answer.
+- **Agent:** Strands Agents with Claude Sonnet 5.5 on AWS Bedrock AgentCore. It interprets the question and words the answer.
+- **Tools:** a separate MCP server, also on AgentCore. `warehouse_query` goes from semantic layer to SQL writer to guard to Snowflake to audit log.
+- **Infrastructure:** AWS CDK, Secrets Manager, and a CloudWatch dashboard with alarms.
+- **Quality loop:** a golden-set eval (97–100% SQL accuracy, 0% hallucination), CI on every push and nightly, and thumbs-downs that become new test cases.
+
+The decision I would make again: **the agent never writes SQL.** A dedicated writer model does, and it sees the semantic layer's definition and a reference query for every metric the question names. Each number therefore has exactly one definition, and the agent can stay focused on understanding the user.
+
+Read-only is enforced three times. sqlglot parses every query and rejects writes, extra statements, unknown tables and residents' personal data. The Snowflake role can only SELECT. Every transaction is rolled back.
+
+## What I learned
+
+**The model matters more than I expected.** With Amazon Nova Lite as the agent, SQL accuracy on the golden set was 61%. With Claude Sonnet it was 97%, using the same prompts, tools and data. Most of the gap came from follow-up questions: Nova answered them from the previous turn's text instead of running a new query, which produced confident numbers that no query had produced.
+
+**The hardest part was making the eval trustworthy.** My first grader failed correct answers when tied rows came back in a different order, when columns were renamed, when results were pivoted wide, or when a follow-up needed the earlier turn's result. I fixed each of these without letting real errors through. Only then did a score mean something, and only then could I compare models and warehouses with it.
+
+## Next
+
+Latency. p95 is about 13 seconds, because two models run in series: the agent, then the SQL writer. A question that maps cleanly onto one metric could skip the writer and run the semantic layer's compiled query directly. Streaming the answer token by token would also make the wait feel shorter even where the total time stays the same.
