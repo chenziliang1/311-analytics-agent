@@ -1,0 +1,264 @@
+# data/site.toml
+#
+# Every sentence this app says, grouped by the surface it appears on.
+#
+# The contract is one way: every key named in `REQUIRED_SITE_KEYS`
+# (lib/site/schema.ts) must exist here, extra keys are allowed and only the
+# component that knows about them reads them.
+#
+# TOML trap: once an array of tables starts, every bare key after it belongs to
+# the last element of that array. So each section's plain fields come first.
+
+
+# === Brand =================================================================
+[brand]
+displayName = "CityPulse 311 Lens"
+
+logoPrefix = "citypulse"
+logoAccent = "lens"
+
+footerName = "CityPulse311Lens"
+
+
+# === <head> ================================================================
+[seo]
+locale = "en_US"
+title = "CityPulse 311 Lens: AI-Powered 311 Service Request Analytics Agent"
+description = "An AI agent for city 311 service request analytics. Find misrouted requests, emergencies filed as routine, fast closures that fixed nothing, and the early signs of a complaint to city council, through natural conversation."
+keywords = [
+    "311",
+    "Govtech",
+    "Service Requests",
+    "SLA Analytics",
+    "AI Agent",
+    "Text Classification",
+    "City Operations",
+    "Resident Complaints",
+]
+
+
+# === The four business threads. Exactly four ==============================
+#
+# One config, rendered twice: the capability cards on the home page and the
+# insight cards on the agent welcome screen.
+#
+#   title    the concept name. Precise to an insider, opaque to everyone else
+#   subtitle one plain sentence. This is what a stranger reads first
+#   tooltip  two or three sentences: define the term, then say what moves it
+#
+# No jargon inside a tooltip. Explaining one insider word with another is the
+# mistake this field exists to prevent.
+#
+# This used to be two arrays, `home.capabilities` and `chat.insights`, naming
+# the same four things in two vocabularies. They had already drifted: the
+# second thread was "Portfolio Concentration" on one screen and "Portfolio
+# Health" on the other, with a different icon and no tooltip.
+
+[[capabilities]]
+icon = "Target"
+title = "Routing Accuracy"
+subtitle = "How often a resident's report is sent to the wrong queue"
+tooltip = "Every report is sorted into a category by a language model, and that category decides which city department receives it. When the model is unsure, the report lands in a catch-all pile that is handled more slowly. How often the sorting is right varies a lot from city to city, because residents in different places describe the same problem in different words."
+
+[[capabilities]]
+icon = "AlertTriangle"
+title = "Hidden Urgency"
+subtitle = "Emergencies that residents filed as routine"
+tooltip = "Residents choose how serious their report is when they file it, and many describe a gas leak or a downed power line while choosing medium. The report then waits in an ordinary queue. Reading what residents wrote, rather than what they ticked, finds these reports, and they come back after being closed about five times as often as the rest."
+
+[[capabilities]]
+icon = "Clock"
+title = "True On-Time Rate"
+subtitle = "Whether a fast closure actually fixed the problem"
+tooltip = "Cities report the share of requests closed within the time they promised. A crew can close a ticket quickly without fixing anything, though, and the same address reports the problem again a few weeks later. The true on-time rate only counts a closure as a success if nobody at that address has to report again within 30 days."
+
+[[capabilities]]
+icon = "Users"
+title = "Escalation Early Warning"
+subtitle = "The words that come before a complaint to city council"
+tooltip = "A small share of residents give up on the hotline and write to their council member, which costs the city far more than the original repair. Their first report often already says so, with phrases like third time or fed up. Spotting that language early gives the city a chance to act before the letter is written."
+
+
+# === Home page =============================================================
+[home]
+tagline = "311 Service Request Analytics Agent"
+
+description = "An AI agent that helps the teams running a city 311 hotline understand what really happens to residents' reports, through natural conversation. Find requests sent down the wrong queue, emergencies filed as routine, quick closures that fixed nothing, and the early signs of a complaint to city council."
+
+blurb = "Analyzing 311 service request data: 23 tables, ~11.1 million records covering 120 cities, a million resident reports, their work orders, and the model that sorts them"
+
+techStack = ["Strands SDK", "AWS Bedrock", "PostgreSQL", "Next.js"]
+
+[home.headline]
+prefix = "CityPulse 311 "
+accent = "Lens"
+
+[home.cta]
+title = "Start Analyzing"
+subtitle = "Ask questions about 311 service requests in plain English"
+
+# Labels for the overlay that renders business-context.md.
+[home.businessContext]
+triggerLabel = "What problem does this solve?"
+title = "The business behind the agent"
+subtitle = "A city can close most residents' reports on time and still have residents writing to their council member, because the numbers it reports miss what residents actually wrote. This is where that gap comes from, and what this agent does about it."
+
+
+# === Agent page ============================================================
+[chat]
+agent = "Lens"
+welcomeSubtitle = "Ask questions about 311 service requests across 120 cities in plain English."
+tryExamples = "Try: \"Which cities breached SLA most often last month?\" or \"How accurate is the classifier in Quebec?\""
+
+suggestionsHint = "Ask me directly or click a suggestion"
+inputPlaceholder = "Enter your question..."
+
+[chat.messages]
+# A whole sentence: the banner prints it as-is. It used to be a fragment that
+# a component wrapped in "I'm here to help you with ...", and the two halves
+# drifted into printing the frame twice.
+welcomeMessage = "I'm here to help you with 311 service request analytics."
+waitForResponse = "Wait for the current answer to finish first."
+# Shown in a red banner when every query in a turn failed, or the request
+# itself did. The conversation stays; the button asks the same question again.
+errorBanner = "Lens couldn't complete that. Try rephrasing the question."
+retry = "Try again"
+# Starts the grey line under an answer that repeats the query's warnings.
+notePrefix = "Note:"
+# {rows} is replaced by the row count. Offered when a result has more than 20.
+downloadCsv = "Download all {rows} rows as CSV"
+newChat = "New chat"
+# Next to "New chat" when sign-in is on. {name} is the GitHub login or name.
+signedInAs = "Signed in as {name}"
+signOut = "Sign out"
+# The thumbs under each answer. A thumbs-down asks for an optional comment;
+# both are stored for review and can become a golden test case.
+feedbackHelpful = "Helpful"
+feedbackNotHelpful = "Not helpful"
+feedbackCommentPlaceholder = "What was wrong? (optional)"
+feedbackSend = "Send"
+feedbackThanks = "Thanks, noted."
+feedbackFailed = "Couldn't save that. Try again."
+
+# What the spinner says while a turn runs, one line per step the backend
+# reports. The step names are the tool names, so a new tool needs a line here.
+[chat.status]
+thinking = "Reading the question"
+warehouseQuery = "Querying the warehouse"
+visualize = "Drawing the chart"
+answering = "Writing the answer"
+# After 15 seconds with no answer.
+slow = "Still working. The first question after a quiet spell has to wake the warehouse, which can take up to a minute."
+stopAndRetry = "Stop and retry"
+busyRetrying = "The service is busy. Retrying once..."
+
+
+# === kickstart questions: exactly 12 ======================================
+#
+# Every one is a rewrite of a line in the Analysis Index of system-prompt.md.
+# Nothing here may ask for an analysis the prompt does not teach.
+#
+# Render quota, exactly 3 of each:
+#
+#   table      "as a Markdown table" and "show the SQL"
+#   flowchart  "as a flowchart"
+#   chart      "as a bar chart" or "as a line chart"
+#   free       none of those phrases may appear
+#
+# The render field draws the icon on the button, the phrase is what actually
+# makes the block appear. `mise run check` verifies both directions.
+
+# === free 1 / 3 ===
+[[chat.suggestedActions]]
+render = "free"
+title = "Introduction"
+label = "What can you do?"
+action = "What can you help me analyze? Give me a short tour of the 311 data and the kinds of questions you answer well."
+
+# === chart 1 / 3 (bar, ranking) ===
+# Analysis Index: Accuracy by vocabulary drift (§6)
+[[chat.suggestedActions]]
+render = "chart"
+title = "Accuracy by Dialect"
+label = "Where does the classifier struggle?"
+action = "Compare classifier accuracy on audited requests over the last 12 months across low, medium and high vocabulary drift tenants. Show it as a bar chart, then say in one line how far the high drift tenants fall behind."
+
+# === flowchart 1 / 3 (funnel) ===
+# Analysis Index: Request lifecycle funnel (§13)
+[[chat.suggestedActions]]
+render = "flowchart"
+title = "Request Funnel"
+label = "What happened to every request?"
+action = "Trace what happened to every request created in the last 12 months: how many got a work order, how many closed, how many closed on time, how many breached SLA, and how many were reopened. Put the count on each stage. Show it as a flowchart."
+
+# === table 1 / 3 (scorecard) ===
+# Analysis Index: Worst tenants by SLA breach (§9)
+[[chat.suggestedActions]]
+render = "table"
+title = "SLA Watch List"
+label = "Which cities are missing their SLA?"
+action = "List the 20 tenants with the worst SLA breach rate over the last 30 days, counting only tenants with at least 50 closed requests. Give me the tenant code, size tier, vocabulary drift level, closed requests, and breach rate. Show it as a Markdown table, and show the SQL you ran."
+
+# === free 2 / 3 ===
+# Analysis Index: Escalation language and council complaints (§5)
+[[chat.suggestedActions]]
+render = "free"
+title = "Escalation Signals"
+label = "Do angry words predict a complaint?"
+action = "Do residents who write phrases like fed up or third time in their report end up filing a council complaint more often? Say how much more likely it is and whether it is big enough to act on."
+
+# === chart 2 / 3 (line: ordered scale) ===
+# Analysis Index: Monthly volume and channel mix (§8)
+[[chat.suggestedActions]]
+render = "chart"
+title = "Volume Trend"
+label = "Is request volume growing?"
+action = "Give me the number of requests created in each month of the last 12 months. Show it as a line chart, then say in one line whether volume is rising, falling, or seasonal."
+
+# === table 2 / 3 (banded detail) ===
+# Analysis Index: Tenant health dashboard (§12)
+[[chat.suggestedActions]]
+render = "table"
+title = "City Health Check"
+label = "How healthy are four typical cities?"
+action = "Give me the March 2026 health snapshot for Austin, Quebec City, Plano and Burlington: SLA breach rate, reopen rate, repeat at address rate, classifier accuracy, NPS and churn risk. Show it as a Markdown table, and show the SQL you ran."
+
+# === flowchart 2 / 3 (funnel) ===
+# Analysis Index: Other misroutes (§2)
+[[chat.suggestedActions]]
+render = "flowchart"
+title = "The Other Pile"
+label = "What falls into the catch-all bucket?"
+action = "Trace the Other bucket over the last 12 months: closed requests in total, how many landed in Other, how many of those mention a strong category word like pothole or streetlight, and how many of those misrouted requests breached SLA. Put the count on each stage. Show it as a flowchart."
+
+# === chart 3 / 3 (bar, two series: a gap) ===
+# Analysis Index: True on-time resolution rate (§4)
+[[chat.suggestedActions]]
+render = "chart"
+title = "True On-Time Rate"
+label = "Do the on-time numbers hold up?"
+action = "For the five tenants where it drops the most, give me the reported on-time rate and the true on-time rate once a repeat report at the same address within 30 days counts as a failure. Show it as a bar chart with one series for each, then say in one line how much the reports overstate."
+
+# === table 3 / 3 (ranking with evidence) ===
+# Analysis Index: Tenant classifier accuracy vs SLA (§6)
+[[chat.suggestedActions]]
+render = "table"
+title = "Weakest Classifiers"
+label = "Which cities does the model misread?"
+action = "List the 10 tenants with the lowest classifier accuracy over the last 12 months. Give me the tenant code, vocabulary drift level, audited requests, and accuracy. Show it as a Markdown table, and show the SQL you ran."
+
+# === flowchart 3 / 3 (branching path) ===
+# Analysis Index: Escalation channel breakdown (§5)
+[[chat.suggestedActions]]
+render = "flowchart"
+title = "The Escalation Path"
+label = "How does a report become a complaint?"
+action = "Trace the escalation path for requests created from June 2025 through the end of March 2026: how many used escalation language, how many of those became a council complaint within 60 days, and which channel those complaints went through. Put the count on each stage. Show it as a flowchart."
+
+# === free 3 / 3 ===
+# Analysis Index: Severity divergence and reopens (§3)
+[[chat.suggestedActions]]
+render = "free"
+title = "Hidden Emergencies"
+label = "Are emergencies filed as routine?"
+action = "When a resident marks a request low or medium but describes a gas leak, a fire or a live wire, is that request reopened more often? Say how big the difference is and why the ticked severity misses it."
