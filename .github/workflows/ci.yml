@@ -1,0 +1,48 @@
+# Every push and pull request: the checks that need no credentials and cost
+# nothing. The golden-set eval is eval.yml.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: uv sync --locked --all-extras
+      - name: Unit tests
+        run: .venv/bin/pytest tests_python -q
+      # Prompts, semantic layer, golden set and kickstart questions against
+      # the warehouse DDL; needs no database.
+      - name: Content consistency
+        run: .venv/bin/agent-app check-content
+
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Node tests
+        run: node --test tests_node/*.test.js
+      # The only check for site.toml keys and icon names.
+      - name: Build
+        run: pnpm exec next build

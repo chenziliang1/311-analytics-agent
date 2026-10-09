@@ -1,0 +1,85 @@
+# The golden-set eval: a fast SQL-accuracy run on
+# pull requests that can change an answer, the full five scores nightly.
+#
+# Spends real money and reads the real warehouse, so it needs two repository
+# secrets: ANTHROPIC_API_KEY, and SNOWFLAKE_PRIVATE_KEY (the PEM text of
+# ~/.snowflake/citypulse/ro_rsa_key.p8). Without them -- a fork's pull
+# request, or a repository not set up yet -- the job says so and passes.
+name: eval
+
+on:
+  pull_request:
+    paths:
+      - "data/**"
+      - "agent_app/**"
+      - "api/**"
+      - ".env.defaults"
+  schedule:
+    - cron: "0 9 * * *" # 09:00 UTC, after the US working day
+  workflow_dispatch:
+    inputs:
+      cases:
+        description: "Case ids or prefixes, comma-separated; empty runs all"
+        required: false
+        default: ""
+      judge:
+        description: "Run the LLM judge (all five scores)"
+        type: boolean
+        default: true
+
+concurrency:
+  group: eval-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  grade:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      SNOWFLAKE_PRIVATE_KEY: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
+      # Pull requests get the quick run: result matching only, no judge.
+      JUDGE: ${{ github.event_name == 'pull_request' && 'false' || (github.event_name == 'workflow_dispatch' && inputs.judge == false && 'false') || 'true' }}
+      CASES: ${{ inputs.cases }}
+    steps:
+      - name: Check the secrets are set
+        id: secrets
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ] || [ -z "$SNOWFLAKE_PRIVATE_KEY" ]; then
+            echo "::notice::ANTHROPIC_API_KEY or SNOWFLAKE_PRIVATE_KEY is not set; skipping the eval."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.secrets.outputs.run == 'true'
+      - uses: astral-sh/setup-uv@v6
+        if: steps.secrets.outputs.run == 'true'
+        with:
+          python-version: "3.12"
+      - name: Install
+        if: steps.secrets.outputs.run == 'true'
+        run: uv sync --locked
+      - name: Grade
+        if: steps.secrets.outputs.run == 'true'
+        run: |
+          args=()
+          [ "$JUDGE" = "false" ] && args+=(--nojudge)
+          [ -n "$CASES" ] && args+=(--cases "$CASES")
+          set -o pipefail
+          .venv/bin/agent-app grade "${args[@]}" 2>&1 | tee grade.log
+      - name: Summary
+        if: always() && steps.secrets.outputs.run == 'true'
+        run: |
+          {
+            echo '## Golden-set eval'
+            echo '```'
+            sed -n '/ runs, /,/^Report:/p' grade.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.secrets.outputs.run == 'true'
+        with:
+          name: eval-report
+          path: tmp/eval/*.json
+          if-no-files-found: ignore
