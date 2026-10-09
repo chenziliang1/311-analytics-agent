@@ -6,7 +6,6 @@ tmp/
 # Next.js
 .next/
 next-env.d.ts
-tsconfig.json
 
 # TypeScript incremental build cache
 *.tsbuildinfo
