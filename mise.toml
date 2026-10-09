@@ -1,0 +1,219 @@
+[env]
+# The FastAPI dev server's port. next.config.js proxies /api to it and
+# kill-dev-servers.py guards it, so all three read this one value. To move it on
+# one machine (another app already owns 8000), override it in mise.local.toml,
+# which is gitignored.
+API_PORT = "8000"
+
+[tools]
+python = "3.12"
+ruff = "latest"
+uv = "latest"
+node = "24"
+pnpm = "latest"
+
+# === Tasks
+[tasks.venv-create]
+description = "✨ Create Python virtual environment (.venv)"
+run = "uv venv"
+
+[tasks.venv-remove]
+description = "💥 Remove Python virtual environment folder (.venv)"
+run = "rm -r .venv"
+
+[tasks.inst-python-deps]
+description = "💾 Install Python dependencies via uv"
+run = "uv sync --all-extras"
+
+[tasks.inst-node-deps]
+description = "📦 Install Node.js dependencies via pnpm"
+run = "pnpm install"
+
+[tasks.inst]
+description = "💾 Install all dependencies (Python + Node.js)"
+depends = ["inst-python-deps", "inst-node-deps"]
+
+[tasks.export]
+description = "💾 Export Python dependencies to requirements.txt (not used by Vercel)"
+# Vercel does NOT read this. It reads pyproject.toml + uv.lock directly, and
+# when both exist it prefers the lock file. The task is kept for deploying
+# somewhere that only understands requirements.txt; the generated file is not
+# committed, because a second dependency list is a second thing to drift.
+run = "uv export --format requirements-txt --no-dev --no-emit-project --no-hashes --no-annotate --no-emit-package pywin32 --no-emit-package colorama --no-emit-package tzdata | sed 's/ ; platform_machine ==.*or.*//' > requirements.txt"
+
+# === cli
+#
+# Thin wrappers over `agent-app`, the console script `pyproject.toml` installs
+# from `agent_app/cli.py`. Everything below this banner is one line long and
+# does nothing of its own: the behaviour lives in the CLI, and these tasks exist
+# so that `mise run` stays the single entry point a person has to remember.
+#
+# They call the console script rather than a file path, so a command's
+# implementation can move without a task pointing at the old place.
+#
+# The `cli-` prefix is what says these are wrappers. A task without it does its
+# own work; a task with it is a door onto a subcommand you can also run
+# directly, which matters when you want to pass flags without `mise run --`.
+
+[tasks.cli-check-content]
+# The two halves of "did the swap land": this one reads the prose in `data/`,
+# `build-web` reads the same file through the frontend loader. Neither catches
+# what the other does, so a swap runs both.
+#
+# Named for what it touches rather than `check`, because a task called `check`
+# tells nobody which of the repo's several checks it is.
+description = "🔍 Check data/ still agrees with the prompt and the seed (run after a dataset swap)"
+run = ".venv/bin/agent-app check-content"
+
+[tasks.cli-test-db-conn]
+# The smallest possible round trip to the cloud database: connect, SELECT 1,
+# disconnect. It names no schema and no table on purpose, so that a failure here
+# means credentials or network and nothing else. When the agent is not working,
+# this is the first thing to run: it separates "cannot reach the database" from
+# "reached it, but the schema is empty", which otherwise look the same.
+description = "🔌 Check this machine can reach the cloud PostgreSQL (SELECT 1)"
+run = ".venv/bin/agent-app test-db-conn"
+
+[tasks.cli-print-db-schema]
+# The agent's entire picture of the database, in the compact encoding it is
+# actually shown. Worth looking at whenever an answer is wrong in a way that
+# suggests the model misread the tables: this is the input it misread.
+description = "🗺️ Print the database schema exactly as the agent is shown it"
+run = ".venv/bin/agent-app print-db-schema"
+
+[tasks.cli-replay-semantic-layer]
+# Every metric in data/semantic_layer/ against the real database, compared with
+# the value it was signed off with. Run it after editing a formula: a number
+# that moved is a definition that changed, and that has to be on purpose.
+description = "📐 Replay every semantic layer metric against the database"
+run = ".venv/bin/agent-app replay-semantic-layer"
+
+[tasks.cli-push-secrets]
+# This machine's model key and database settings into the Secrets Manager
+# entries the deployed runtimes read. Prints key names only.
+description = "🔐 Push credentials to Secrets Manager for the AgentCore runtimes"
+run = ".venv/bin/agent-app push-secrets"
+
+[tasks.cli-grade]
+# The golden conversations in data/eval/, through the real /api/chat, graded
+# on SQL result accuracy, answer accuracy (LLM judge), hallucination, the
+# explained rate and p95 latency. Costs real money -- each case is a full agent
+# turn plus a judge call. Pass options after --, e.g. `-- --cases G08,M01`.
+description = "🎯 Grade the agent on the golden conversations (spends model credits)"
+run = ".venv/bin/agent-app grade"
+
+[tasks.cli-feedback]
+# Thumbs up and down from the chat, newest first. `-- --draft <id>` turns a
+# thumbs-down into a golden case draft under tmp/feedback/ for review.
+description = "👎 Triage chat feedback; draft a golden case from a thumbs-down"
+run = ".venv/bin/agent-app feedback"
+
+# === end cli
+
+[tasks.test-python]
+description = "🧪 Run Python tests with pytest"
+run = ".venv/bin/pytest tests_python"
+
+[tasks.test-node]
+description = "🧪 Run Node.js tests"
+run = "node --test tests_node/*.test.js"
+
+# The only thing that reads `data/site.toml` through the frontend's own loader,
+# so it is the only thing that catches a missing required key or an `icon` that
+# `lib/icons.ts` does not export. Left unchecked, a misspelled icon renders as
+# the fallback glyph: the card looks fine, it is just the wrong picture, and
+# nothing says a word. It also type-checks the TypeScript and statically renders
+# both routes, which is what puts `business-context.md` through the real
+# Markdown pipeline.
+#
+# A build task rather than a check task because it really does produce `.next/`.
+# It just happens to be the cheapest way to verify the frontend without opening
+# a browser.
+[tasks.build-web]
+description = "🏗️ Build the Next.js frontend (also the only check for site.toml keys and icon names)"
+run = "pnpm exec next build"
+
+# === infra: the AgentCore deployment (infra/, a CDK app) ===
+# Each one talks to the AWS account of the current credentials. synth and
+# diff only read; deploy and destroy change the account.
+
+[tasks.infra-synth]
+description = "☁️ Synthesize the CDK stacks (no AWS changes)"
+dir = "infra"
+run = "npx --yes aws-cdk@2 synth --quiet"
+
+[tasks.infra-diff]
+description = "☁️ Show what a deploy would change in the AWS account"
+dir = "infra"
+run = "npx --yes aws-cdk@2 diff"
+
+[tasks.infra-deploy]
+# Builds the ARM64 image locally (Docker must be running), pushes it to ECR,
+# then deploys secrets, the two runtimes and the dashboard. First time in an
+# account: `npx aws-cdk@2 bootstrap` from infra/ once.
+description = "☁️ Deploy the agent and its tools to AgentCore Runtime"
+dir = "infra"
+run = "npx --yes aws-cdk@2 deploy --all --require-approval broadening"
+
+[tasks.snowflake-bootstrap]
+# Key pairs for the two service users (kept in ~/.snowflake/citypulse/, never
+# printed) and the one-time admin SQL, written to tmp/ to paste into Snowsight.
+description = "❄️ Make Snowflake service-user keys and the one-time admin SQL"
+run = ".venv/bin/python infra/snowflake/bootstrap.py"
+
+[tasks.snowflake-load]
+# The SQLite seed through RAW -> STAGING -> ANALYTICS, grants, the row access
+# policy, then row-count, key and policy checks. `-- --step verify` to check only.
+description = "❄️ Load the seed into Snowflake (RAW -> STAGING -> ANALYTICS) and verify it"
+run = ".venv/bin/python infra/snowflake/load.py"
+
+[tasks.infra-destroy]
+description = "☁️ Delete every CityPulse stack from the AWS account"
+dir = "infra"
+run = "npx --yes aws-cdk@2 destroy --all"
+
+[tasks.test]
+description = "🧪 Run all checks and tests (content consistency + Python + Node.js)"
+depends = ["cli-check-content", "test-python", "test-node"]
+
+[tasks.cov-python]
+description = "🧪 Run Python code coverage tests with pytest"
+run = ".venv/bin/pytest tests_python -s --tb=native --cov=agent_app --cov-report term-missing --cov-report html:htmlcov"
+
+[tasks.cov]
+description = "🧪 Run all code coverage tests (Python + Node.js)"
+depends = ["cov-python"]
+
+# Every dev server is stamped with this env var so `mise run kill` can find
+# exactly our processes and nothing else. Children inherit it, so tagging the
+# top of each tree tags next-server, the postcss worker, and the uvicorn
+# reloader for free.
+#
+# The name is generic on purpose and may be shared with other projects: what
+# identifies a checkout is the *value*, which is this checkout's path, so a
+# second clone never kills the first one's servers.
+# kill-dev-servers.py reads the same name -- change it in both places or in
+# neither.
+[tasks.next-dev]
+description = "🌐 Start Next.js development server"
+env = { AGENT_APP_DEV_SERVER = "{{config_root}}" }
+# Pinned to 3000 on purpose. Left to itself Next.js hops to 3001 when 3000 is
+# taken, but next.config.js rewrites /api to 127.0.0.1:$API_PORT, so the
+# hopped-to frontend silently talks to whichever backend owns that port -- possibly
+# another checkout's. Failing to start is the better outcome.
+run = "next dev --port 3000"
+
+[tasks.fastapi-dev]
+description = "⚙️ Start FastAPI development server"
+env = { AGENT_APP_DEV_SERVER = "{{config_root}}" }
+run = "uv run -- python -m uvicorn api.index:app --reload --host 127.0.0.1 --port $API_PORT"
+
+[tasks.dev]
+description = "🚀 Start all development servers (Next.js + FastAPI)"
+depends = ["kill"]
+env = { AGENT_APP_DEV_SERVER = "{{config_root}}" }
+run = "pnpm exec concurrently 'mise run next-dev' 'mise run fastapi-dev'"
+
+[tasks.kill]
+description = "🛑 Kill this project's development servers (Next.js + FastAPI)"
+run = "uv run -- python kill-dev-servers.py"
