@@ -1,0 +1,28 @@
+# An allow-list: the Vercel CLI uploads every file it is not told to skip, and
+# it does not read .gitignore. As a deny-list this file would have to keep up
+# with .env, the 1 GB SQLite seed and everything else the repo grows; as an
+# allow-list it cannot upload what it never names.
+#
+# Files starting with underscore are ignored by Vercel regardless
+# (e.g., api/_index_bkp_v1.py, api/lib/_utils.py).
+/*
+!api
+!app
+!components
+!hooks
+!lib
+!data
+!agent_app
+!package.json
+!pnpm-lock.yaml
+!next.config.js
+!proxy.ts
+!next-env.d.ts
+!tsconfig.json
+!tailwind.config.ts
+!postcss.config.mjs
+!vercel.json
+!pyproject.toml
+!uv.lock
+!.env.defaults
+**/__pycache__
