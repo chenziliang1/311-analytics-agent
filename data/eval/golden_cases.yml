@@ -1,0 +1,1545 @@
+# Golden conversations for `agent-app eval`.
+#
+# G01-G20: one per query in dataset/03-*_sql_queries.md (Q1-Q20), transpiled to
+# PostgreSQL; the reference query is that query. M01-M10: two-turn conversations
+# whose graded turn is a follow-up. A question states every window and filter its
+# reference query applies, so the reference is the only right answer to it.
+#
+# The expected values are not stored: each reference query runs at eval time.
+
+- id: G01-other-misroutes
+  source: Q1
+  questions:
+  - Over the last 12 months, how many closed requests landed in the Other bucket even though the description
+    names a specific category like pothole or streetlight, and what was their SLA breach rate?
+  - How big is the Other misroute problem in the last year? Count the closed Other requests that mention
+    a strong category word and give their breach rate.
+  reference_sql: |
+    WITH labeled AS (
+      SELECT
+        sr.request_id,
+        sc.is_other,
+        CASE
+          WHEN LOWER(rd.description_text) LIKE '%pothole%'
+          OR LOWER(rd.description_text) LIKE '%hole in road%'
+          OR LOWER(rd.description_text) LIKE '%streetlight%'
+          OR LOWER(rd.description_text) LIKE '%street light%'
+          OR LOWER(rd.description_text) LIKE '%graffiti%'
+          OR LOWER(rd.description_text) LIKE '%illegal dumping%'
+          OR LOWER(rd.description_text) LIKE '%dumped%'
+          OR LOWER(rd.description_text) LIKE '%noise%'
+          OR LOWER(rd.description_text) LIKE '%tree limb%'
+          OR LOWER(rd.description_text) LIKE '%fallen tree%'
+          THEN 1
+          ELSE 0
+        END AS has_strong_keyword,
+        CASE WHEN NOT sbl.breach_id IS NULL THEN 1 ELSE 0 END AS is_breach
+      FROM service_requests AS sr
+      JOIN service_categories AS sc
+        ON sc.category_id = sr.auto_category_id
+      JOIN request_descriptions AS rd
+        ON rd.request_id = sr.request_id
+      LEFT JOIN sla_breach_log AS sbl
+        ON sbl.request_id = sr.request_id
+      WHERE
+        sr.created_at >= '2025-06-01'
+        AND sr.created_at < '2026-06-01'
+        AND NOT sr.closed_at IS NULL
+    )
+    SELECT
+      is_other,
+      has_strong_keyword,
+      COUNT(*) AS request_count,
+      SUM(is_breach) AS breach_count,
+      ROUND(CAST(1.0 * SUM(is_breach) / NULLIF(COUNT(*), 0) AS DECIMAL), 3) AS sla_breach_rate
+    FROM labeled
+    GROUP BY
+      is_other,
+      has_strong_keyword
+    ORDER BY
+      is_other NULLS FIRST,
+      has_strong_keyword NULLS FIRST
+  match:
+    values:
+    - request_count
+    - sla_breach_rate
+    where:
+    - is_other: 1
+      has_strong_keyword: 1
+  metrics:
+  - other_misroute_rate
+  - sla_breach_rate
+- id: G02-hidden-emergencies
+  source: Q2
+  questions:
+  - Over the last 12 months, for closed requests a resident marked low or medium severity, is the reopen
+    rate higher when the description mentions an emergency like a gas leak, fire or live wire?
+  reference_sql: |
+    WITH base AS (
+      SELECT
+        sr.request_id,
+        sr.stated_severity,
+        CASE
+          WHEN LOWER(rd.description_text) LIKE '%gas leak%'
+          OR LOWER(rd.description_text) LIKE '%live wire%'
+          OR LOWER(rd.description_text) LIKE '%fire%'
+          OR LOWER(rd.description_text) LIKE '%smoke%'
+          OR LOWER(rd.description_text) LIKE '%child injured%'
+          OR LOWER(rd.description_text) LIKE '%kid hurt%'
+          OR LOWER(rd.description_text) LIKE '%leaking%'
+          THEN 1
+          ELSE 0
+        END AS has_emergency_keyword
+      FROM service_requests AS sr
+      JOIN request_descriptions AS rd
+        ON rd.request_id = sr.request_id
+      WHERE
+        sr.stated_severity IN ('low', 'medium')
+        AND sr.created_at >= '2025-06-01'
+        AND sr.created_at < '2026-06-01'
+        AND NOT sr.closed_at IS NULL
+    ), reopens AS (
+      SELECT DISTINCT
+        request_id
+      FROM request_events
+      WHERE
+        event_type = 'reopened' AND event_at >= '2025-06-01' AND event_at < '2026-07-01'
+    )
+    SELECT
+      b.has_emergency_keyword,
+      COUNT(*) AS closed_request_count,
+      SUM(CASE WHEN NOT r.request_id IS NULL THEN 1 ELSE 0 END) AS reopened_count,
+      ROUND(
+        CAST(1.0 * SUM(CASE WHEN NOT r.request_id IS NULL THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0) AS DECIMAL),
+        3
+      ) AS reopen_rate
+    FROM base AS b
+    LEFT JOIN reopens AS r
+      ON r.request_id = b.request_id
+    GROUP BY
+      b.has_emergency_keyword
+    ORDER BY
+      b.has_emergency_keyword NULLS FIRST
+  match:
+    values:
+    - reopen_rate
+  metrics:
+  - reopen_rate
+- id: G03-quick-close-repeats
+  source: Q3
+  questions:
+  - For requests created from June 2025 through April 2026 and closed on time, do the ones closed within
+    24 hours get a repeat request at the same address within 30 days more often than the rest?
+  reference_sql: |
+    WITH base AS (
+      SELECT
+        sr.request_id,
+        sr.address_id,
+        sr.created_at,
+        sr.closed_at,
+        CASE
+          WHEN NOT sr.closed_at IS NULL
+          AND (
+            EXTRACT(EPOCH FROM CAST(sr.closed_at AS TIMESTAMP)) / 86400.0
+          ) - (
+            EXTRACT(EPOCH FROM CAST(sr.created_at AS TIMESTAMP)) / 86400.0
+          ) <= 1.0
+          THEN 1
+          ELSE 0
+        END AS is_quick_close,
+        CASE WHEN sbl.breach_id IS NULL THEN 1 ELSE 0 END AS is_on_time
+      FROM service_requests AS sr
+      LEFT JOIN sla_breach_log AS sbl
+        ON sbl.request_id = sr.request_id
+      WHERE
+        NOT sr.address_id IS NULL
+        AND sr.is_duplicate = 0
+        AND NOT sr.closed_at IS NULL
+        AND sr.created_at >= '2025-06-01'
+        AND sr.created_at < '2026-05-01'
+    ), with_next AS (
+      SELECT
+        request_id,
+        address_id,
+        created_at,
+        closed_at,
+        is_quick_close,
+        is_on_time,
+        LEAD(created_at) OVER (PARTITION BY address_id ORDER BY created_at NULLS FIRST) AS next_request_at_same_address
+      FROM base
+    )
+    SELECT
+      is_quick_close,
+      COUNT(*) AS closed_on_time_count,
+      SUM(
+        CASE
+          WHEN NOT next_request_at_same_address IS NULL
+          AND (
+            EXTRACT(EPOCH FROM CAST(next_request_at_same_address AS TIMESTAMP)) / 86400.0
+          ) - (
+            EXTRACT(EPOCH FROM CAST(closed_at AS TIMESTAMP)) / 86400.0
+          ) <= 30
+          THEN 1
+          ELSE 0
+        END
+      ) AS repeat_within_30d,
+      ROUND(
+        CAST(1.0 * SUM(
+          CASE
+            WHEN NOT next_request_at_same_address IS NULL
+            AND (
+              EXTRACT(EPOCH FROM CAST(next_request_at_same_address AS TIMESTAMP)) / 86400.0
+            ) - (
+              EXTRACT(EPOCH FROM CAST(closed_at AS TIMESTAMP)) / 86400.0
+            ) <= 30
+            THEN 1
+            ELSE 0
+          END
+        ) / NULLIF(COUNT(*), 0) AS DECIMAL),
+        3
+      ) AS repeat_at_address_rate
+    FROM with_next
+    WHERE
+      is_on_time = 1
+    GROUP BY
+      is_quick_close
+    ORDER BY
+      is_quick_close NULLS FIRST
+  match:
+    values:
+    - repeat_at_address_rate
+  metrics:
+  - repeat_at_address_rate
+- id: G04-escalation-language
+  source: Q4
+  questions:
+  - For requests created from June 2025 through March 2026, how much more often does a request become
+    a council complaint within 60 days when its text uses escalation language like fed up or third time?
+  reference_sql: |
+    WITH escalated AS (
+        SELECT DISTINCT cc.primary_request_id AS request_id
+        FROM citizen_complaints cc
+        JOIN service_requests sr ON sr.request_id = cc.primary_request_id
+        WHERE cc.filed_at <= sr.created_at + INTERVAL '60 days'
+    ),
+    labeled AS (
+        SELECT sr.request_id,
+               CASE WHEN LOWER(rd.description_text) LIKE '%third time%'
+                      OR LOWER(rd.description_text) LIKE '%fed up%'
+                      OR LOWER(rd.description_text) LIKE '%contact my councilman%'
+                      OR LOWER(rd.description_text) LIKE '%going to the news%'
+                      OR LOWER(rd.description_text) LIKE '%get a lawyer%'
+                      OR LOWER(rd.description_text) LIKE '%my lawyer%'
+                    THEN 1 ELSE 0 END AS has_escalation_phrase
+        FROM service_requests sr
+        JOIN request_descriptions rd ON rd.request_id = sr.request_id
+        WHERE sr.created_at >= '2025-06-01'
+          AND sr.created_at < '2026-04-01'
+    )
+    SELECT l.has_escalation_phrase,
+           COUNT(*) AS requests,
+           COUNT(e.request_id) AS escalated,
+           ROUND(1.0 * COUNT(e.request_id) / COUNT(*), 4) AS council_escalation_rate
+    FROM labeled l
+    LEFT JOIN escalated e ON e.request_id = l.request_id
+    GROUP BY l.has_escalation_phrase
+    ORDER BY l.has_escalation_phrase
+  match:
+    values:
+    - council_escalation_rate
+  metrics:
+  - council_escalation_rate
+- id: G05-weakest-classifiers-sla
+  source: Q5
+  questions:
+  - Which 10 tenants have the lowest classifier accuracy on audited requests over the last 12 months,
+    and what is each one's SLA breach rate over the same period?
+  - Show me the ten cities where the classifier is least accurate in the last year, with each city's SLA
+    breach rate.
+  reference_sql: |
+    WITH accuracy_by_tenant AS (
+      SELECT
+        sr.tenant_id,
+        COUNT(*) AS audited_count,
+        SUM(
+          CASE WHEN mp.predicted_category_id = mp.ground_truth_category_id THEN 1 ELSE 0 END
+        ) AS correct_count,
+        ROUND(
+          CAST(1.0 * SUM(
+            CASE WHEN mp.predicted_category_id = mp.ground_truth_category_id THEN 1 ELSE 0 END
+          ) / NULLIF(COUNT(*), 0) AS DECIMAL),
+          3
+        ) AS classifier_accuracy
+      FROM model_predictions AS mp
+      JOIN service_requests AS sr
+        ON sr.request_id = mp.request_id
+      WHERE
+        mp.is_audited = 1
+        AND mp.predicted_at >= '2025-06-01'
+        AND mp.predicted_at < '2026-06-01'
+      GROUP BY
+        sr.tenant_id
+    ), sla_by_tenant AS (
+      SELECT
+        sr.tenant_id,
+        COUNT(*) AS closed_count,
+        SUM(CASE WHEN NOT sbl.breach_id IS NULL THEN 1 ELSE 0 END) AS breach_count,
+        ROUND(
+          CAST(1.0 * SUM(CASE WHEN NOT sbl.breach_id IS NULL THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0) AS DECIMAL),
+          3
+        ) AS sla_breach_rate
+      FROM service_requests AS sr
+      LEFT JOIN sla_breach_log AS sbl
+        ON sbl.request_id = sr.request_id
+      WHERE
+        NOT sr.closed_at IS NULL
+        AND sr.created_at >= '2025-06-01'
+        AND sr.created_at < '2026-06-01'
+      GROUP BY
+        sr.tenant_id
+    )
+    SELECT
+      t.tenant_id,
+      t.tenant_code,
+      t.tenant_name,
+      t.vocab_drift_level,
+      a.classifier_accuracy,
+      s.sla_breach_rate,
+      a.audited_count,
+      s.closed_count
+    FROM tenants AS t
+    JOIN accuracy_by_tenant AS a
+      ON a.tenant_id = t.tenant_id
+    JOIN sla_by_tenant AS s
+      ON s.tenant_id = t.tenant_id
+    ORDER BY
+      a.classifier_accuracy ASC NULLS FIRST
+  match:
+    labels:
+    - tenant_code
+    values:
+    - classifier_accuracy
+    - sla_breach_rate
+    top: 10
+    ordered: true
+  metrics:
+  - classifier_accuracy
+  - sla_breach_rate
+- id: G06-general-queue
+  source: Q6
+  questions:
+  - For closed requests created in the last 12 months, how does the general queue compare with specialist
+    departments on SLA breach rate and average calendar days to close?
+  reference_sql: |
+    SELECT
+      d.is_general_queue,
+      COUNT(*) AS closed_request_count,
+      SUM(CASE WHEN NOT sbl.breach_id IS NULL THEN 1 ELSE 0 END) AS breach_count,
+      ROUND(
+        CAST(1.0 * SUM(CASE WHEN NOT sbl.breach_id IS NULL THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0) AS DECIMAL),
+        3
+      ) AS sla_breach_rate,
+      ROUND(CAST(AVG(sbl.actual_business_days) AS DECIMAL), 2) AS avg_actual_business_days_for_breached,
+      ROUND(
+        CAST(AVG(
+          (
+            EXTRACT(EPOCH FROM CAST(sr.closed_at AS TIMESTAMP)) / 86400.0
+          ) - (
+            EXTRACT(EPOCH FROM CAST(sr.created_at AS TIMESTAMP)) / 86400.0
+          )
+        ) AS DECIMAL),
+        2
+      ) AS avg_calendar_days
+    FROM service_requests AS sr
+    JOIN departments AS d
+      ON d.dept_id = sr.routed_dept_id
+    LEFT JOIN sla_breach_log AS sbl
+      ON sbl.request_id = sr.request_id
+    WHERE
+      NOT sr.closed_at IS NULL
+      AND sr.created_at >= '2025-06-01'
+      AND sr.created_at < '2026-06-01'
+    GROUP BY
+      d.is_general_queue
+    ORDER BY
+      d.is_general_queue NULLS FIRST
+  match:
+    values:
+    - sla_breach_rate
+    - avg_calendar_days
+  metrics:
+  - sla_breach_rate
+  - avg_days_to_close
+- id: G07-monthly-channel-volume
+  source: Q7
+  questions:
+  - How many requests came in through each intake channel in May 2026?
+  reference_sql: |
+    SELECT
+      TO_CHAR(CAST(sr.created_at AS TIMESTAMP), 'YYYY-MM') AS month_label,
+      ic.channel_code,
+      COUNT(*) AS request_count
+    FROM service_requests AS sr
+    JOIN intake_channels AS ic
+      ON ic.channel_id = sr.channel_id
+    WHERE
+      sr.created_at >= '2025-06-01' AND sr.created_at < '2026-06-01'
+    GROUP BY
+      month_label,
+      ic.channel_code
+    ORDER BY
+      month_label NULLS FIRST,
+      ic.channel_code NULLS FIRST
+  match:
+    labels:
+    - channel_code
+    values:
+    - request_count
+    where:
+    - month_label: 2026-05
+  metrics:
+  - request_volume
+- id: G08-sla-watch-list
+  source: Q8
+  questions:
+  - Which 20 tenants had the worst SLA breach rate over the last 30 days, counting only tenants with at
+    least 50 closed requests?
+  - Top 20 cities by SLA breach rate for requests closed in the last 30 days, minimum 50 closed requests
+    each.
+  reference_sql: |
+    SELECT
+      t.tenant_id,
+      t.tenant_code,
+      t.tenant_name,
+      t.size_tier,
+      COUNT(*) AS closed_request_count,
+      SUM(CASE WHEN NOT sbl.breach_id IS NULL THEN 1 ELSE 0 END) AS breach_count,
+      ROUND(
+        CAST(1.0 * SUM(CASE WHEN NOT sbl.breach_id IS NULL THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0) AS DECIMAL),
+        3
+      ) AS sla_breach_rate
+    FROM tenants AS t
+    JOIN service_requests AS sr
+      ON sr.tenant_id = t.tenant_id
+    LEFT JOIN sla_breach_log AS sbl
+      ON sbl.request_id = sr.request_id
+    WHERE
+      NOT sr.closed_at IS NULL
+      AND sr.closed_at >= '2026-05-01'
+      AND sr.closed_at < '2026-06-01'
+    GROUP BY
+      t.tenant_id,
+      t.tenant_code,
+      t.tenant_name,
+      t.size_tier
+    HAVING
+      COUNT(*) >= 50
+    ORDER BY
+      sla_breach_rate DESC NULLS LAST,
+      breach_count DESC NULLS LAST
+    LIMIT 20
+  match:
+    labels:
+    - tenant_code
+    values:
+    - sla_breach_rate
+    top: 15
+    ordered: true
+  metrics:
+  - sla_breach_rate
+- id: G09-severity-agreement-by-channel
+  source: Q9
+  questions:
+  - For requests created in the six months before June 2026, on each intake channel, what share of requests
+    have a ticked severity that agrees with the text? Agreement means an emergency word with high or emergency
+    severity, or no emergency word with low or medium severity.
+  reference_sql: |
+    WITH labeled AS (
+      SELECT
+        ic.channel_code,
+        sr.stated_severity,
+        CASE
+          WHEN LOWER(rd.description_text) LIKE '%gas leak%'
+          OR LOWER(rd.description_text) LIKE '%live wire%'
+          OR LOWER(rd.description_text) LIKE '%fire%'
+          OR LOWER(rd.description_text) LIKE '%smoke%'
+          OR LOWER(rd.description_text) LIKE '%child injured%'
+          OR LOWER(rd.description_text) LIKE '%kid hurt%'
+          OR LOWER(rd.description_text) LIKE '%leaking%'
+          THEN 1
+          ELSE 0
+        END AS has_emergency_keyword
+      FROM service_requests AS sr
+      JOIN request_descriptions AS rd
+        ON rd.request_id = sr.request_id
+      JOIN intake_channels AS ic
+        ON ic.channel_id = sr.channel_id
+      WHERE
+        sr.created_at >= '2025-12-01' AND sr.created_at < '2026-06-01'
+    )
+    SELECT
+      channel_code,
+      COUNT(*) AS request_count,
+      SUM(
+        CASE
+          WHEN has_emergency_keyword = 1 AND stated_severity IN ('high', 'emergency')
+          THEN 1
+          WHEN has_emergency_keyword = 0 AND stated_severity IN ('low', 'medium')
+          THEN 1
+          ELSE 0
+        END
+      ) AS consistent_count,
+      ROUND(
+        CAST(1.0 * SUM(
+          CASE
+            WHEN has_emergency_keyword = 1 AND stated_severity IN ('high', 'emergency')
+            THEN 1
+            WHEN has_emergency_keyword = 0 AND stated_severity IN ('low', 'medium')
+            THEN 1
+            ELSE 0
+          END
+        ) / NULLIF(COUNT(*), 0) AS DECIMAL),
+        3
+      ) AS consistency_rate
+    FROM labeled
+    GROUP BY
+      channel_code
+    ORDER BY
+      consistency_rate DESC NULLS LAST
+  match:
+    labels:
+    - channel_code
+    values:
+    - consistency_rate
+- id: G10-arr-by-size
+  source: Q10
+  questions:
+  - How is ARR from active subscriptions split across city size tiers, with and without the AI Insight
+    Pack? Give the tenant count and total ARR for each group.
+  reference_sql: |
+    SELECT
+      t.size_tier,
+      ts.has_ai_insight_pack,
+      COUNT(*) AS tenant_count,
+      ROUND(CAST(SUM(ts.arr_usd) AS DECIMAL), 0) AS total_arr_usd,
+      ROUND(CAST(AVG(ts.arr_usd) AS DECIMAL), 0) AS avg_arr_usd
+    FROM tenants AS t
+    JOIN tenant_subscriptions AS ts
+      ON ts.tenant_id = t.tenant_id
+    WHERE
+      ts.is_active = 1
+    GROUP BY
+      t.size_tier,
+      ts.has_ai_insight_pack
+    ORDER BY
+      t.size_tier NULLS FIRST,
+      ts.has_ai_insight_pack DESC NULLS LAST
+  match:
+    labels:
+    - size_tier
+    values:
+    - tenant_count
+    - total_arr_usd
+  metrics:
+  - total_arr_usd
+- id: G11-accuracy-drift-size
+  source: Q11
+  questions:
+  - Over the last 12 months, for each vocabulary drift level and city size tier, how many tenants are
+    there and what is their average per-tenant classifier accuracy on audited requests?
+  reference_sql: |
+    WITH per_tenant_accuracy AS (
+      SELECT
+        sr.tenant_id,
+        ROUND(
+          CAST(1.0 * SUM(
+            CASE WHEN mp.predicted_category_id = mp.ground_truth_category_id THEN 1 ELSE 0 END
+          ) / NULLIF(COUNT(*), 0) AS DECIMAL),
+          3
+        ) AS accuracy
+      FROM model_predictions AS mp
+      JOIN service_requests AS sr
+        ON sr.request_id = mp.request_id
+      WHERE
+        mp.is_audited = 1
+        AND mp.predicted_at >= '2025-06-01'
+        AND mp.predicted_at < '2026-06-01'
+      GROUP BY
+        sr.tenant_id
+    ), joined AS (
+      SELECT
+        t.tenant_id,
+        t.vocab_drift_level,
+        t.size_tier,
+        pta.accuracy
+      FROM tenants AS t
+      JOIN per_tenant_accuracy AS pta
+        ON pta.tenant_id = t.tenant_id
+    )
+    SELECT
+      vocab_drift_level,
+      size_tier,
+      COUNT(*) AS tenant_count,
+      ROUND(CAST(AVG(accuracy) AS DECIMAL), 3) AS avg_accuracy,
+      MIN(accuracy) AS min_accuracy,
+      MAX(accuracy) AS max_accuracy,
+      RANK() OVER (PARTITION BY vocab_drift_level ORDER BY AVG(accuracy) ASC NULLS FIRST) AS rank_within_drift_level
+    FROM joined
+    GROUP BY
+      vocab_drift_level,
+      size_tier
+    ORDER BY
+      vocab_drift_level NULLS FIRST,
+      avg_accuracy ASC NULLS FIRST
+  match:
+    labels:
+    - vocab_drift_level
+    - size_tier
+    values:
+    - tenant_count
+    - avg_accuracy
+  metrics:
+  - classifier_accuracy
+- id: G12-true-on-time-gap
+  source: Q12
+  questions:
+  - Which 5 tenants have the biggest gap between the reported on-time rate and the true on-time rate,
+    where a repeat request at the same address within 30 days counts as a failure? Use requests created
+    from June 2025 through April 2026, and only tenants with at least 500 such requests.
+  reference_sql: |
+    WITH base AS (
+      SELECT
+        sr.tenant_id,
+        sr.request_id,
+        sr.address_id,
+        sr.created_at,
+        sr.closed_at,
+        CASE WHEN sbl.breach_id IS NULL THEN 1 ELSE 0 END AS is_on_time
+      FROM service_requests AS sr
+      LEFT JOIN sla_breach_log AS sbl
+        ON sbl.request_id = sr.request_id
+      WHERE
+        NOT sr.closed_at IS NULL
+        AND NOT sr.address_id IS NULL
+        AND sr.is_duplicate = 0
+        AND sr.created_at >= '2025-06-01'
+        AND sr.created_at < '2026-05-01'
+    ), with_next AS (
+      SELECT
+        b.*,
+        LEAD(created_at) OVER (PARTITION BY address_id ORDER BY created_at NULLS FIRST) AS next_request_at_same_address
+      FROM base AS b
+    ), labeled AS (
+      SELECT
+        tenant_id,
+        is_on_time,
+        CASE
+          WHEN NOT next_request_at_same_address IS NULL
+          AND (
+            EXTRACT(EPOCH FROM CAST(next_request_at_same_address AS TIMESTAMP)) / 86400.0
+          ) - (
+            EXTRACT(EPOCH FROM CAST(closed_at AS TIMESTAMP)) / 86400.0
+          ) <= 30
+          THEN 1
+          ELSE 0
+        END AS has_repeat_within_30d
+      FROM with_next
+    )
+    SELECT
+      t.tenant_id,
+      t.tenant_code,
+      t.tenant_name,
+      COUNT(*) AS total_requests,
+      ROUND(CAST(1.0 * SUM(is_on_time) / NULLIF(COUNT(*), 0) AS DECIMAL), 3) AS reported_on_time_rate,
+      ROUND(
+        CAST(1.0 * SUM(CASE WHEN is_on_time = 1 AND has_repeat_within_30d = 0 THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0) AS DECIMAL),
+        3
+      ) AS true_on_time_rate,
+      ROUND(
+        CAST(1.0 * SUM(is_on_time) / NULLIF(COUNT(*), 0) - 1.0 * SUM(CASE WHEN is_on_time = 1 AND has_repeat_within_30d = 0 THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0) AS DECIMAL),
+        3
+      ) AS gap
+    FROM labeled AS l
+    JOIN tenants AS t
+      ON t.tenant_id = l.tenant_id
+    GROUP BY
+      t.tenant_id,
+      t.tenant_code,
+      t.tenant_name
+    HAVING
+      COUNT(*) >= 500
+    ORDER BY
+      gap DESC NULLS LAST
+    LIMIT 30
+  match:
+    labels:
+    - tenant_code
+    values:
+    - reported_on_time_rate
+    - true_on_time_rate
+    top: 5
+  metrics:
+  - true_on_time_rate
+- id: G13-escalation-channels
+  source: Q13
+  questions:
+  - For requests created from June 2025 through March 2026 whose text uses escalation language, how many
+    of those requests led to a council complaint through each escalation channel?
+  reference_sql: |
+    WITH labeled AS (
+      SELECT
+        sr.request_id,
+        sr.created_at,
+        CASE
+          WHEN LOWER(rd.description_text) LIKE '%third time%'
+          OR LOWER(rd.description_text) LIKE '%fed up%'
+          OR LOWER(rd.description_text) LIKE '%contact my councilman%'
+          OR LOWER(rd.description_text) LIKE '%going to the news%'
+          OR LOWER(rd.description_text) LIKE '%get a lawyer%'
+          OR LOWER(rd.description_text) LIKE '%my lawyer%'
+          THEN 1
+          ELSE 0
+        END AS has_escalation_phrase
+      FROM service_requests AS sr
+      JOIN request_descriptions AS rd
+        ON rd.request_id = sr.request_id
+      WHERE
+        sr.created_at >= '2025-06-01' AND sr.created_at < '2026-04-01'
+    ), joined AS (
+      SELECT
+        l.request_id,
+        l.has_escalation_phrase,
+        COALESCE(cc.escalation_channel, 'no_escalation') AS escalation_channel
+      FROM labeled AS l
+      LEFT JOIN citizen_complaints AS cc
+        ON cc.primary_request_id = l.request_id
+        AND /* Match Q4's definition: only count complaints filed within 60 days of created */ (
+          EXTRACT(EPOCH FROM CAST(cc.filed_at AS TIMESTAMP)) / 86400.0
+        ) - (
+          EXTRACT(EPOCH FROM CAST(l.created_at AS TIMESTAMP)) / 86400.0
+        ) <= 60
+    )
+    SELECT
+      has_escalation_phrase,
+      escalation_channel,
+      COUNT(*) AS request_count,
+      ROUND(
+        CAST(100.0 * COUNT(*) / NULLIF(SUM(COUNT(*)) OVER (PARTITION BY has_escalation_phrase), 0) AS DECIMAL),
+        2
+      ) AS pct_within_phrase_group
+    FROM joined
+    GROUP BY
+      has_escalation_phrase,
+      escalation_channel
+    ORDER BY
+      has_escalation_phrase NULLS FIRST,
+      escalation_channel NULLS FIRST
+  match:
+    labels:
+    - escalation_channel
+    values:
+    - request_count
+    where:
+    - has_escalation_phrase: 1
+      escalation_channel: council_letter
+    - has_escalation_phrase: 1
+      escalation_channel: news_media
+    - has_escalation_phrase: 1
+      escalation_channel: lawyer_letter
+    - has_escalation_phrase: 1
+      escalation_channel: social_viral
+  metrics:
+  - council_escalation_rate
+- id: G14-reopen-timing
+  source: Q14
+  questions:
+  - Over the last 12 months, how long after closure do reopens happen? Count reopens within 1 day, 2 to
+    7 days, and 8 to 30 days of the closure.
+  reference_sql: |
+    WITH events_ordered AS (
+        SELECT request_id, event_type, event_at,
+               LAG(event_at) OVER (PARTITION BY request_id ORDER BY event_at, event_id) AS prev_event_at,
+               LAG(event_type) OVER (PARTITION BY request_id ORDER BY event_at, event_id) AS prev_event_type
+        FROM request_events
+        WHERE event_at >= '2025-06-01' AND event_at < '2026-06-01'
+    ),
+    gaps AS (
+        SELECT EXTRACT(EPOCH FROM (event_at - prev_event_at)) / 86400.0 AS days_since_close
+        FROM events_ordered
+        WHERE event_type = 'reopened' AND prev_event_type = 'closed'
+    )
+    SELECT CASE WHEN days_since_close <= 1 THEN '0_1_day'
+                WHEN days_since_close <= 7 THEN '2_7_days'
+                ELSE '8_30_days' END AS days_bucket,
+           COUNT(*) AS reopen_count,
+           ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 1) AS pct_of_reopens
+    FROM gaps
+    GROUP BY 1
+    ORDER BY MIN(days_since_close)
+  match:
+    values:
+    - reopen_count
+  metrics:
+  - reopen_rate
+- id: G15-category-groups
+  source: Q15
+  questions:
+  - Which category groups had the most requests created in the last 12 months? Rank them with their counts.
+  reference_sql: |
+    SELECT
+      sc.category_group,
+      COUNT(*) AS request_count,
+      ROUND(CAST(100.0 * COUNT(*) / NULLIF(SUM(COUNT(*)) OVER (), 0) AS DECIMAL), 2) AS share_pct
+    FROM service_requests AS sr
+    JOIN service_categories AS sc
+      ON sc.category_id = sr.auto_category_id
+    WHERE
+      sr.created_at >= '2025-06-01' AND sr.created_at < '2026-06-01'
+    GROUP BY
+      sc.category_group
+    ORDER BY
+      request_count DESC NULLS LAST
+    LIMIT 10
+  match:
+    labels:
+    - category_group
+    values:
+    - request_count
+    top: 5
+    ordered: true
+  metrics:
+  - request_volume
+- id: G16-avoidable-breaches
+  source: Q16
+  questions:
+  - Which 5 tenants would have avoided the most SLA breaches over the last 12 months if their Other misroutes
+    had gone to a specialist queue? Only tenants with at least 20 misroutes.
+  reference_sql: |
+    WITH classified AS (
+      SELECT
+        sr.tenant_id,
+        sr.request_id,
+        sc.is_other,
+        CASE
+          WHEN LOWER(rd.description_text) LIKE '%pothole%'
+          OR LOWER(rd.description_text) LIKE '%hole in road%'
+          OR LOWER(rd.description_text) LIKE '%streetlight%'
+          OR LOWER(rd.description_text) LIKE '%street light%'
+          OR LOWER(rd.description_text) LIKE '%graffiti%'
+          OR LOWER(rd.description_text) LIKE '%illegal dumping%'
+          OR LOWER(rd.description_text) LIKE '%dumped%'
+          OR LOWER(rd.description_text) LIKE '%noise%'
+          OR LOWER(rd.description_text) LIKE '%tree limb%'
+          OR LOWER(rd.description_text) LIKE '%fallen tree%'
+          THEN 1
+          ELSE 0
+        END AS has_strong_keyword,
+        CASE WHEN NOT sbl.breach_id IS NULL THEN 1 ELSE 0 END AS is_breach
+      FROM service_requests AS sr
+      JOIN service_categories AS sc
+        ON sc.category_id = sr.auto_category_id
+      JOIN request_descriptions AS rd
+        ON rd.request_id = sr.request_id
+      LEFT JOIN sla_breach_log AS sbl
+        ON sbl.request_id = sr.request_id
+      WHERE
+        NOT sr.closed_at IS NULL
+        AND sr.created_at >= '2025-06-01'
+        AND sr.created_at < '2026-06-01'
+    ), rates AS (
+      SELECT
+        tenant_id,
+        SUM(CASE WHEN is_other = 1 AND has_strong_keyword = 1 THEN 1 ELSE 0 END) AS misroute_pool,
+        SUM(
+          CASE
+            WHEN is_other = 1 AND has_strong_keyword = 1 AND is_breach = 1
+            THEN 1
+            ELSE 0
+          END
+        ) AS misroute_breach_count,
+        SUM(CASE WHEN is_other = 0 THEN is_breach ELSE 0 END) * 1.0 / NULLIF(NULLIF(SUM(CASE WHEN is_other = 0 THEN 1 ELSE 0 END), 0), 0) AS non_other_breach_rate,
+        SUM(CASE WHEN is_other = 1 THEN is_breach ELSE 0 END) * 1.0 / NULLIF(NULLIF(SUM(CASE WHEN is_other = 1 THEN 1 ELSE 0 END), 0), 0) AS other_breach_rate
+      FROM classified
+      GROUP BY
+        tenant_id
+    )
+    SELECT
+      t.tenant_id,
+      t.tenant_code,
+      t.tenant_name,
+      r.misroute_pool,
+      ROUND(CAST(r.other_breach_rate AS DECIMAL), 3) AS other_breach_rate,
+      ROUND(CAST(r.non_other_breach_rate AS DECIMAL), 3) AS non_other_breach_rate,
+      ROUND(
+        CAST(r.misroute_pool * (
+          r.other_breach_rate - r.non_other_breach_rate
+        ) AS DECIMAL),
+        1
+      ) AS avoidable_breaches
+    FROM rates AS r
+    JOIN tenants AS t
+      ON t.tenant_id = r.tenant_id
+    WHERE
+      r.misroute_pool >= 20
+    ORDER BY
+      avoidable_breaches DESC NULLS LAST
+    LIMIT 10
+  match:
+    labels:
+    - tenant_code
+    values:
+    - avoidable_breaches
+    top: 5
+  metrics:
+  - other_misroute_rate
+  - sla_breach_rate
+- id: G17-french-accuracy-gap
+  source: Q17
+  questions:
+  - Over the last 12 months, how does average per-tenant classifier accuracy compare between tenants with
+    French vocabulary and the rest, within each size tier?
+  reference_sql: |
+    WITH per_tenant_accuracy AS (
+      SELECT
+        sr.tenant_id,
+        1.0 * SUM(
+          CASE WHEN mp.predicted_category_id = mp.ground_truth_category_id THEN 1 ELSE 0 END
+        ) / NULLIF(COUNT(*), 0) AS accuracy,
+        COUNT(*) AS audited_count
+      FROM model_predictions AS mp
+      JOIN service_requests AS sr
+        ON sr.request_id = mp.request_id
+      WHERE
+        mp.is_audited = 1
+        AND mp.predicted_at >= '2025-06-01'
+        AND mp.predicted_at < '2026-06-01'
+      GROUP BY
+        sr.tenant_id
+    )
+    SELECT
+      t.has_french_vocab,
+      t.size_tier,
+      COUNT(*) AS tenant_count,
+      ROUND(CAST(AVG(pta.accuracy) AS DECIMAL), 3) AS avg_accuracy,
+      ROUND(CAST(MIN(pta.accuracy) AS DECIMAL), 3) AS min_accuracy,
+      ROUND(CAST(MAX(pta.accuracy) AS DECIMAL), 3) AS max_accuracy
+    FROM tenants AS t
+    JOIN per_tenant_accuracy AS pta
+      ON pta.tenant_id = t.tenant_id
+    GROUP BY
+      t.has_french_vocab,
+      t.size_tier
+    ORDER BY
+      t.has_french_vocab DESC NULLS LAST,
+      t.size_tier NULLS FIRST
+  match:
+    labels:
+    - size_tier
+    values:
+    - avg_accuracy
+  metrics:
+  - classifier_accuracy
+- id: G18-staff-throughput
+  source: Q18
+  questions:
+  - Crediting each request to the first staff member it was assigned to, which 5 staff members handled
+    the most requests first assigned in the last 12 months, and what share of all those requests breached
+    SLA? Only staff with at least 100 requests.
+  reference_sql: |
+    WITH first_assignment AS (
+      SELECT
+        request_id,
+        staff_id,
+        MIN(assigned_at) AS first_assigned_at
+      FROM request_assignments
+      WHERE
+        NOT staff_id IS NULL
+        AND assigned_at >= '2025-06-01'
+        AND assigned_at < '2026-06-01'
+      GROUP BY
+        request_id,
+        staff_id
+    ), joined AS (
+      SELECT
+        fa.staff_id,
+        fa.request_id,
+        CASE WHEN NOT sbl.breach_id IS NULL THEN 1 ELSE 0 END AS is_breach
+      FROM first_assignment AS fa
+      LEFT JOIN sla_breach_log AS sbl
+        ON sbl.request_id = fa.request_id
+    )
+    SELECT
+      su.staff_id,
+      su.staff_name,
+      su.role,
+      d.dept_name,
+      t.tenant_code,
+      COUNT(*) AS handled_count,
+      SUM(j.is_breach) AS breach_count,
+      ROUND(CAST(1.0 * SUM(j.is_breach) / NULLIF(COUNT(*), 0) AS DECIMAL), 3) AS breach_rate
+    FROM joined AS j
+    JOIN staff_users AS su
+      ON su.staff_id = j.staff_id
+    JOIN departments AS d
+      ON d.dept_id = su.dept_id
+    JOIN tenants AS t
+      ON t.tenant_id = su.tenant_id
+    GROUP BY
+      su.staff_id,
+      su.staff_name,
+      su.role,
+      d.dept_name,
+      t.tenant_code
+    HAVING
+      COUNT(*) >= 100
+    ORDER BY
+      handled_count DESC NULLS LAST
+    LIMIT 20
+  match:
+    labels:
+    - staff_name
+    values:
+    - handled_count
+    - breach_rate
+    top: 5
+    ordered: true
+  metrics:
+  - sla_breach_rate
+- id: G19-category-reopens
+  source: Q19
+  questions:
+  - Which 3 service categories had the highest reopen rate for closed requests created in the last 12
+    months, among categories with at least 500 closed requests?
+  reference_sql: |
+    WITH category_stats AS (
+      SELECT
+        sc.category_id,
+        sc.category_code,
+        sc.category_group,
+        COUNT(DISTINCT sr.request_id) AS total_closed,
+        COUNT(DISTINCT CASE WHEN re.event_type = 'reopened' THEN sr.request_id END) AS reopened_count
+      FROM service_requests AS sr
+      JOIN service_categories AS sc
+        ON sc.category_id = sr.auto_category_id
+      LEFT JOIN request_events AS re
+        ON re.request_id = sr.request_id
+        AND re.event_type = 'reopened'
+        AND re.event_at >= '2025-06-01'
+        AND re.event_at < '2026-07-01'
+      WHERE
+        NOT sr.closed_at IS NULL
+        AND sr.created_at >= '2025-06-01'
+        AND sr.created_at < '2026-06-01'
+      GROUP BY
+        sc.category_id,
+        sc.category_code,
+        sc.category_group
+    ), ranked AS (
+      SELECT
+        category_id,
+        category_code,
+        category_group,
+        total_closed,
+        reopened_count,
+        ROUND(CAST(1.0 * reopened_count / NULLIF(total_closed, 0) AS DECIMAL), 3) AS reopen_rate,
+        RANK() OVER (ORDER BY 1.0 * reopened_count / NULLIF(total_closed, 0) DESC NULLS LAST) AS rk
+      FROM category_stats
+      WHERE
+        total_closed >= 500
+    )
+    SELECT
+      *
+    FROM ranked
+    WHERE
+      rk <= 10
+    ORDER BY
+      rk NULLS FIRST
+  match:
+    values:
+    - total_closed
+    - reopen_rate
+    top: 3
+    ordered: true
+  metrics:
+  - reopen_rate
+- id: G20-health-check
+  source: Q20
+  questions:
+  - 'Give me the March 2026 health snapshot for Austin, Quebec City, Plano and Burlington: SLA breach
+    rate, reopen rate, classifier accuracy and NPS.'
+  reference_sql: |
+    SELECT
+      t.tenant_code,
+      t.tenant_name,
+      t.size_tier,
+      t.vocab_drift_level,
+      ths.request_count,
+      ROUND(CAST(ths.sla_breach_rate AS DECIMAL), 3) AS sla_breach_rate,
+      ROUND(CAST(ths.reopen_rate AS DECIMAL), 3) AS reopen_rate,
+      ROUND(CAST(ths.repeat_at_address_rate AS DECIMAL), 3) AS repeat_at_address_rate,
+      ROUND(CAST(ths.classifier_accuracy AS DECIMAL), 3) AS classifier_accuracy,
+      ROUND(CAST(ths.council_escalation_rate AS DECIMAL), 4) AS council_escalation_rate,
+      ths.nps_score,
+      ths.churn_risk_band
+    FROM tenant_health_snapshots AS ths
+    JOIN tenants AS t
+      ON t.tenant_id = ths.tenant_id
+    WHERE
+      ths.snapshot_month = '2026-03-01'
+      AND t.tenant_code IN ('austin_tx', 'quebec_qc', 'plano_tx', 'burlington_vt')
+    ORDER BY
+      CASE t.tenant_code
+        WHEN 'austin_tx'
+        THEN 1
+        WHEN 'quebec_qc'
+        THEN 2
+        WHEN 'plano_tx'
+        THEN 3
+        WHEN 'burlington_vt'
+        THEN 4
+      END NULLS FIRST
+  match:
+    labels:
+    - tenant_code
+    values:
+    - sla_breach_rate
+    - reopen_rate
+    - classifier_accuracy
+    - nps_score
+- id: M01-breach-by-size
+  source: multi-turn
+  history:
+  - Which 20 tenants had the worst SLA breach rate over the last 30 days, counting only tenants with at
+    least 50 closed requests?
+  questions:
+  - Now give me the SLA breach rate for all requests closed in that window, by size tier.
+  reference_sql: |
+    SELECT t.size_tier,
+           COUNT(*) AS closed_requests,
+           ROUND(1.0 * SUM(CASE WHEN sbl.breach_id IS NOT NULL THEN 1 ELSE 0 END) / COUNT(*), 3) AS sla_breach_rate
+    FROM service_requests sr
+    JOIN tenants t ON t.tenant_id = sr.tenant_id
+    LEFT JOIN sla_breach_log sbl ON sbl.request_id = sr.request_id
+    WHERE sr.closed_at >= '2026-05-01' AND sr.closed_at < '2026-06-01'
+    GROUP BY t.size_tier
+    ORDER BY sla_breach_rate DESC
+  match:
+    labels:
+    - size_tier
+    values:
+    - sla_breach_rate
+  metrics:
+  - sla_breach_rate
+- id: M02-high-drift-by-size
+  source: multi-turn
+  history:
+  - Compare classifier accuracy on audited requests over the last 12 months across low, medium and high
+    vocabulary drift tenants.
+  questions:
+  - Within the high drift group, how does accuracy differ by city size?
+  reference_sql: |
+    SELECT t.size_tier,
+           COUNT(*) AS audited,
+           ROUND(1.0 * SUM(CASE WHEN mp.predicted_category_id = mp.ground_truth_category_id THEN 1 ELSE 0 END) / COUNT(*), 3) AS classifier_accuracy
+    FROM model_predictions mp
+    JOIN service_requests sr ON sr.request_id = mp.request_id
+    JOIN tenants t ON t.tenant_id = sr.tenant_id
+    WHERE mp.is_audited = 1
+      AND mp.predicted_at >= '2025-06-01' AND mp.predicted_at < '2026-06-01'
+      AND t.vocab_drift_level = 'high'
+    GROUP BY t.size_tier
+    ORDER BY t.size_tier
+  match:
+    labels:
+    - size_tier
+    values:
+    - classifier_accuracy
+  metrics:
+  - classifier_accuracy
+- id: M03-ivr-share
+  source: multi-turn
+  history:
+  - How many requests were created in each month of the last 12 months?
+  questions:
+  - What share of those requests came in by phone, through IVR, each month?
+  reference_sql: |
+    SELECT TO_CHAR(sr.created_at, 'YYYY-MM') AS month,
+           COUNT(*) AS requests,
+           ROUND(100.0 * SUM(CASE WHEN ic.channel_code = 'ivr' THEN 1 ELSE 0 END) / COUNT(*), 1) AS ivr_share_pct
+    FROM service_requests sr
+    JOIN intake_channels ic ON ic.channel_id = sr.channel_id
+    WHERE sr.created_at >= '2025-06-01' AND sr.created_at < '2026-06-01'
+    GROUP BY 1
+    ORDER BY 1
+  match:
+    labels:
+    - month
+    values:
+    - ivr_share_pct
+    where:
+    - month: 2025-06
+    - month: 2026-05
+- id: M04-avoidable-after-funnel
+  source: multi-turn
+  history:
+  - Over the last 12 months, how many closed requests landed in Other, and how many of those mention a
+    strong category word like pothole or streetlight?
+  questions:
+  - Which 5 tenants would have avoided the most breaches if those misroutes had gone to a specialist queue?
+    Only tenants with at least 20 misroutes.
+  reference_sql: |
+    WITH classified AS (
+      SELECT
+        sr.tenant_id,
+        sr.request_id,
+        sc.is_other,
+        CASE
+          WHEN LOWER(rd.description_text) LIKE '%pothole%'
+          OR LOWER(rd.description_text) LIKE '%hole in road%'
+          OR LOWER(rd.description_text) LIKE '%streetlight%'
+          OR LOWER(rd.description_text) LIKE '%street light%'
+          OR LOWER(rd.description_text) LIKE '%graffiti%'
+          OR LOWER(rd.description_text) LIKE '%illegal dumping%'
+          OR LOWER(rd.description_text) LIKE '%dumped%'
+          OR LOWER(rd.description_text) LIKE '%noise%'
+          OR LOWER(rd.description_text) LIKE '%tree limb%'
+          OR LOWER(rd.description_text) LIKE '%fallen tree%'
+          THEN 1
+          ELSE 0
+        END AS has_strong_keyword,
+        CASE WHEN NOT sbl.breach_id IS NULL THEN 1 ELSE 0 END AS is_breach
+      FROM service_requests AS sr
+      JOIN service_categories AS sc
+        ON sc.category_id = sr.auto_category_id
+      JOIN request_descriptions AS rd
+        ON rd.request_id = sr.request_id
+      LEFT JOIN sla_breach_log AS sbl
+        ON sbl.request_id = sr.request_id
+      WHERE
+        NOT sr.closed_at IS NULL
+        AND sr.created_at >= '2025-06-01'
+        AND sr.created_at < '2026-06-01'
+    ), rates AS (
+      SELECT
+        tenant_id,
+        SUM(CASE WHEN is_other = 1 AND has_strong_keyword = 1 THEN 1 ELSE 0 END) AS misroute_pool,
+        SUM(
+          CASE
+            WHEN is_other = 1 AND has_strong_keyword = 1 AND is_breach = 1
+            THEN 1
+            ELSE 0
+          END
+        ) AS misroute_breach_count,
+        SUM(CASE WHEN is_other = 0 THEN is_breach ELSE 0 END) * 1.0 / NULLIF(NULLIF(SUM(CASE WHEN is_other = 0 THEN 1 ELSE 0 END), 0), 0) AS non_other_breach_rate,
+        SUM(CASE WHEN is_other = 1 THEN is_breach ELSE 0 END) * 1.0 / NULLIF(NULLIF(SUM(CASE WHEN is_other = 1 THEN 1 ELSE 0 END), 0), 0) AS other_breach_rate
+      FROM classified
+      GROUP BY
+        tenant_id
+    )
+    SELECT
+      t.tenant_id,
+      t.tenant_code,
+      t.tenant_name,
+      r.misroute_pool,
+      ROUND(CAST(r.other_breach_rate AS DECIMAL), 3) AS other_breach_rate,
+      ROUND(CAST(r.non_other_breach_rate AS DECIMAL), 3) AS non_other_breach_rate,
+      ROUND(
+        CAST(r.misroute_pool * (
+          r.other_breach_rate - r.non_other_breach_rate
+        ) AS DECIMAL),
+        1
+      ) AS avoidable_breaches
+    FROM rates AS r
+    JOIN tenants AS t
+      ON t.tenant_id = r.tenant_id
+    WHERE
+      r.misroute_pool >= 20
+    ORDER BY
+      avoidable_breaches DESC NULLS LAST
+    LIMIT 10
+  match:
+    labels:
+    - tenant_code
+    values:
+    - avoidable_breaches
+    top: 5
+  metrics:
+  - other_misroute_rate
+- id: M05-escalation-channels
+  source: multi-turn
+  history:
+  - For requests created from June 2025 through March 2026, do residents who write phrases like fed up
+    or third time file a council complaint within 60 days more often?
+  questions:
+  - For the ones that used that language and did complain, which channels did the complaints go through?
+  reference_sql: |
+    WITH complaints AS (
+        SELECT cc.primary_request_id AS request_id, cc.escalation_channel
+        FROM citizen_complaints cc
+        JOIN service_requests sr ON sr.request_id = cc.primary_request_id
+        WHERE cc.filed_at <= sr.created_at + INTERVAL '60 days'
+    ),
+    labeled AS (
+        SELECT sr.request_id,
+               CASE WHEN LOWER(rd.description_text) LIKE '%third time%'
+                      OR LOWER(rd.description_text) LIKE '%fed up%'
+                      OR LOWER(rd.description_text) LIKE '%contact my councilman%'
+                      OR LOWER(rd.description_text) LIKE '%going to the news%'
+                      OR LOWER(rd.description_text) LIKE '%get a lawyer%'
+                      OR LOWER(rd.description_text) LIKE '%my lawyer%'
+                    THEN 1 ELSE 0 END AS has_escalation_phrase
+        FROM service_requests sr
+        JOIN request_descriptions rd ON rd.request_id = sr.request_id
+        WHERE sr.created_at >= '2025-06-01' AND sr.created_at < '2026-04-01'
+    )
+    SELECT c.escalation_channel, COUNT(*) AS complaints
+    FROM complaints c
+    JOIN labeled l ON l.request_id = c.request_id
+    WHERE l.has_escalation_phrase = 1
+    GROUP BY c.escalation_channel
+    ORDER BY complaints DESC
+  match:
+    labels:
+    - escalation_channel
+    values:
+    - complaints
+  metrics:
+  - council_escalation_rate
+- id: M06-severity-by-channel
+  source: multi-turn
+  history:
+  - Over the last 12 months, for closed requests marked low or medium severity, is the reopen rate higher
+    when the text mentions an emergency?
+  questions:
+  - Looking at requests created in the six months before June 2026, which intake channel's ticked severity
+    agrees least often with the text? Agreement means an emergency word with high or emergency severity,
+    or no emergency word with low or medium severity.
+  reference_sql: |
+    WITH labeled AS (
+      SELECT
+        ic.channel_code,
+        sr.stated_severity,
+        CASE
+          WHEN LOWER(rd.description_text) LIKE '%gas leak%'
+          OR LOWER(rd.description_text) LIKE '%live wire%'
+          OR LOWER(rd.description_text) LIKE '%fire%'
+          OR LOWER(rd.description_text) LIKE '%smoke%'
+          OR LOWER(rd.description_text) LIKE '%child injured%'
+          OR LOWER(rd.description_text) LIKE '%kid hurt%'
+          OR LOWER(rd.description_text) LIKE '%leaking%'
+          THEN 1
+          ELSE 0
+        END AS has_emergency_keyword
+      FROM service_requests AS sr
+      JOIN request_descriptions AS rd
+        ON rd.request_id = sr.request_id
+      JOIN intake_channels AS ic
+        ON ic.channel_id = sr.channel_id
+      WHERE
+        sr.created_at >= '2025-12-01' AND sr.created_at < '2026-06-01'
+    )
+    SELECT
+      channel_code,
+      COUNT(*) AS request_count,
+      SUM(
+        CASE
+          WHEN has_emergency_keyword = 1 AND stated_severity IN ('high', 'emergency')
+          THEN 1
+          WHEN has_emergency_keyword = 0 AND stated_severity IN ('low', 'medium')
+          THEN 1
+          ELSE 0
+        END
+      ) AS consistent_count,
+      ROUND(
+        CAST(1.0 * SUM(
+          CASE
+            WHEN has_emergency_keyword = 1 AND stated_severity IN ('high', 'emergency')
+            THEN 1
+            WHEN has_emergency_keyword = 0 AND stated_severity IN ('low', 'medium')
+            THEN 1
+            ELSE 0
+          END
+        ) / NULLIF(COUNT(*), 0) AS DECIMAL),
+        3
+      ) AS consistency_rate
+    FROM labeled
+    GROUP BY
+      channel_code
+    ORDER BY
+      consistency_rate DESC NULLS LAST
+  match:
+    labels:
+    - channel_code
+    values:
+    - consistency_rate
+    where:
+    - channel_code: email
+- id: M07-platform-true-on-time
+  source: multi-turn
+  history:
+  - Which 5 tenants have the biggest gap between reported on-time rate and true on-time rate, counting
+    a repeat at the same address within 30 days as a failure? Use requests created from June 2025 through
+    April 2026.
+  questions:
+  - What are the reported and true on-time rates across the whole platform over that same window?
+  reference_sql: |
+    WITH base AS (
+        SELECT sr.address_id, sr.created_at, sr.closed_at,
+               CASE WHEN sbl.breach_id IS NULL THEN 1 ELSE 0 END AS is_on_time
+        FROM service_requests sr
+        LEFT JOIN sla_breach_log sbl ON sbl.request_id = sr.request_id
+        WHERE sr.address_id IS NOT NULL AND sr.is_duplicate = 0 AND sr.closed_at IS NOT NULL
+          AND sr.created_at >= '2025-06-01' AND sr.created_at < '2026-05-01'
+    ),
+    w AS (
+        SELECT b.*, COALESCE(LEAD(created_at) OVER (PARTITION BY address_id ORDER BY created_at)
+                             - closed_at <= INTERVAL '30 days', false) AS has_repeat
+        FROM base b
+    )
+    SELECT ROUND(1.0 * SUM(is_on_time) / COUNT(*), 3) AS reported_on_time_rate,
+           ROUND(1.0 * SUM(CASE WHEN is_on_time = 1 AND NOT has_repeat THEN 1 ELSE 0 END) / COUNT(*), 3) AS true_on_time_rate
+    FROM w
+  match:
+    values:
+    - reported_on_time_rate
+    - true_on_time_rate
+  metrics:
+  - true_on_time_rate
+- id: M08-weakest-sla
+  source: multi-turn
+  history:
+  - Which 10 tenants have the lowest classifier accuracy on audited requests over the last 12 months?
+  questions:
+  - What is each of those ten tenants' SLA breach rate for closed requests created over the same 12 months?
+  reference_sql: |
+    WITH accuracy_by_tenant AS (
+      SELECT
+        sr.tenant_id,
+        COUNT(*) AS audited_count,
+        SUM(
+          CASE WHEN mp.predicted_category_id = mp.ground_truth_category_id THEN 1 ELSE 0 END
+        ) AS correct_count,
+        ROUND(
+          CAST(1.0 * SUM(
+            CASE WHEN mp.predicted_category_id = mp.ground_truth_category_id THEN 1 ELSE 0 END
+          ) / NULLIF(COUNT(*), 0) AS DECIMAL),
+          3
+        ) AS classifier_accuracy
+      FROM model_predictions AS mp
+      JOIN service_requests AS sr
+        ON sr.request_id = mp.request_id
+      WHERE
+        mp.is_audited = 1
+        AND mp.predicted_at >= '2025-06-01'
+        AND mp.predicted_at < '2026-06-01'
+      GROUP BY
+        sr.tenant_id
+    ), sla_by_tenant AS (
+      SELECT
+        sr.tenant_id,
+        COUNT(*) AS closed_count,
+        SUM(CASE WHEN NOT sbl.breach_id IS NULL THEN 1 ELSE 0 END) AS breach_count,
+        ROUND(
+          CAST(1.0 * SUM(CASE WHEN NOT sbl.breach_id IS NULL THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0) AS DECIMAL),
+          3
+        ) AS sla_breach_rate
+      FROM service_requests AS sr
+      LEFT JOIN sla_breach_log AS sbl
+        ON sbl.request_id = sr.request_id
+      WHERE
+        NOT sr.closed_at IS NULL
+        AND sr.created_at >= '2025-06-01'
+        AND sr.created_at < '2026-06-01'
+      GROUP BY
+        sr.tenant_id
+    )
+    SELECT
+      t.tenant_id,
+      t.tenant_code,
+      t.tenant_name,
+      t.vocab_drift_level,
+      a.classifier_accuracy,
+      s.sla_breach_rate,
+      a.audited_count,
+      s.closed_count
+    FROM tenants AS t
+    JOIN accuracy_by_tenant AS a
+      ON a.tenant_id = t.tenant_id
+    JOIN sla_by_tenant AS s
+      ON s.tenant_id = t.tenant_id
+    ORDER BY
+      a.classifier_accuracy ASC NULLS FIRST
+  match:
+    labels:
+    - tenant_code
+    values:
+    - sla_breach_rate
+    top: 10
+  metrics:
+  - sla_breach_rate
+- id: M09-health-most-requests
+  source: multi-turn
+  history:
+  - 'Give me the March 2026 health snapshot for Austin, Quebec City, Plano and Burlington: SLA breach
+    rate, reopen rate and NPS.'
+  questions:
+  - Which of those four cities had the most requests in that snapshot, and how many?
+  reference_sql: |
+    SELECT t.tenant_code, ths.request_count
+    FROM tenant_health_snapshots ths
+    JOIN tenants t ON t.tenant_id = ths.tenant_id
+    WHERE ths.snapshot_month = '2026-03-01'
+      AND t.tenant_code IN ('austin_tx', 'quebec_qc', 'plano_tx', 'burlington_vt')
+    ORDER BY ths.request_count DESC
+    LIMIT 1
+  match:
+    labels:
+    - tenant_code
+    values:
+    - request_count
+- id: M10-large-ai-pack
+  source: multi-turn
+  history:
+  - How is ARR from active subscriptions split across city size tiers?
+  questions:
+  - How many of the large cities have the AI Insight Pack, out of how many large cities in total?
+  reference_sql: |
+    SELECT COUNT(*) AS large_tenants,
+           SUM(ts.has_ai_insight_pack) AS with_ai_pack
+    FROM tenants t
+    JOIN tenant_subscriptions ts ON ts.tenant_id = t.tenant_id
+    WHERE ts.is_active = 1 AND t.size_tier = 'large'
+  match:
+    values:
+    - large_tenants
+    - with_ai_pack
+# From a thumbs-down (agent-app feedback --draft b3cd1d94): the user asked for
+# March's total and commented that they wanted it per channel. Reviewed into a
+# follow-up, which is how that user would have asked next.
+- id: F-b3cd1d94
+  source: feedback b3cd1d94-cda3-4225-9259-e08df071efbd (2026-10-09)
+  history:
+  - How many requests were created in March 2026?
+  questions:
+  - Break that down by intake channel.
+  - Split that March number by intake channel, please.
+  reference_sql: |
+    SELECT
+      ic.channel_code,
+      COUNT(*) AS request_count
+    FROM service_requests AS sr
+    JOIN intake_channels AS ic
+      ON ic.channel_id = sr.channel_id
+    WHERE
+      sr.created_at >= '2026-03-01' AND sr.created_at < '2026-04-01'
+    GROUP BY
+      ic.channel_code
+    ORDER BY
+      request_count DESC
+  match:
+    labels:
+    - channel_code
+    values:
+    - request_count
+  metrics:
+  - request_volume
