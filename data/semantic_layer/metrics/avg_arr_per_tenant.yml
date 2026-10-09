@@ -1,0 +1,16 @@
+name: avg_arr_per_tenant
+display_name: ARR per Tenant (USD)
+description: Average annual recurring revenue per tenant, from active subscriptions.
+base_table: tenant_subscriptions ts
+formula: AVG(ts.arr_usd)
+filters:
+  - ts.is_active = 1
+synonyms: [arr per tenant, arr per city, average arr, contract value, 客单价]
+notes: >
+  One active subscription per tenant, so grouped by tenant this is that tenant's ARR.
+  arr_usd is a float; round it for display.
+# Reference: active subscriptions, 120 tenants; no time axis.
+replay:
+  time_window: trailing_12m
+  expected: 432901.43
+  tolerance: 1.0

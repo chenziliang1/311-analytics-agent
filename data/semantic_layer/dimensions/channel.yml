@@ -1,0 +1,8 @@
+name: channel
+display_name: Intake Channel
+expression: ic.channel_code
+alias: ic
+joins:
+  sr: JOIN intake_channels ic ON ic.channel_id = sr.channel_id
+allowed_values: [web, mobile_app, ivr, social, email, walk_in]
+synonyms: [channels, intake channel, 渠道]

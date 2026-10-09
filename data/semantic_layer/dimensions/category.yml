@@ -1,0 +1,7 @@
+name: category
+display_name: Service Category
+expression: sc.category_name
+alias: sc
+joins:
+  sr: JOIN service_categories sc ON sc.category_id = sr.auto_category_id
+synonyms: [categories, request type, type of request, 类别]

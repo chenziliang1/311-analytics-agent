@@ -1,0 +1,15 @@
+name: quick_close_rate
+display_name: Quick Close Rate
+description: Share of closed requests closed within 24 hours of creation.
+base_table: service_requests sr
+formula: 1.0 * SUM(CASE WHEN sr.closed_at - sr.created_at <= INTERVAL '24 hours' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0)
+filters:
+  - sr.closed_at IS NOT NULL
+time_column: sr.created_at
+closed_time_column: sr.closed_at
+synonyms: [quick close, quick closes, closed within 24 hours, same day close, 快速关闭率]
+# Reference: closed within 24 hours, trailing 12 months.
+replay:
+  time_window: trailing_12m
+  expected: 0.3814
+  tolerance: 0.0005

@@ -1,0 +1,9 @@
+name: citizen_last_name
+display_name: Resident Last Name
+expression: c.last_name
+alias: c
+joins:
+  sr: JOIN citizens c ON c.citizen_id = sr.citizen_id
+source_column: citizens.last_name
+sensitive: true
+synonyms: [resident last name, citizen last name]

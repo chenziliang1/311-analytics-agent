@@ -1,0 +1,20 @@
+name: reopen_rate
+display_name: Reopen Rate
+description: Share of closed requests that were reopened at least once after closure.
+base_table: service_requests sr
+joins:
+  - "LEFT JOIN (SELECT DISTINCT request_id FROM request_events WHERE event_type = 'reopened') re ON re.request_id = sr.request_id"
+formula: 1.0 * SUM(CASE WHEN re.request_id IS NOT NULL THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0)
+filters:
+  - sr.closed_at IS NOT NULL
+time_column: sr.created_at
+closed_time_column: sr.closed_at
+synonyms: [reopens, reopened, reopen, came back, 重开率]
+notes: >
+  A reopen is an event in request_events, never a lasting status: current_status
+  = 'reopened' is almost never seen. DISTINCT so a request reopened twice counts once.
+# Reference: system-prompt.md section 3 reopens CTE, all closed requests.
+replay:
+  time_window: trailing_12m
+  expected: 0.0627
+  tolerance: 0.0005

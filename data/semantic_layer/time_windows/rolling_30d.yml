@@ -1,0 +1,6 @@
+name: rolling_30d
+display_name: Last 30 Days
+start: 2026-05-01
+end: 2026-06-01
+anchor: closed
+synonyms: [last 30 days, past 30 days, last month, past month, rolling 30, 过去30天, 上个月]

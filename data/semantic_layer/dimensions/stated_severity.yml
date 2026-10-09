@@ -1,0 +1,5 @@
+name: stated_severity
+display_name: Stated Severity
+expression: sr.stated_severity
+allowed_values: [low, medium, high, emergency]
+synonyms: [severity, ticked severity, priority, 严重度]

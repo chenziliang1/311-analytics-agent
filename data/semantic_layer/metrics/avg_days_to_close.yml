@@ -1,0 +1,16 @@
+name: avg_days_to_close
+display_name: Average Days to Close
+description: Mean calendar days from creation to closure, closed requests only.
+base_table: service_requests sr
+formula: AVG(EXTRACT(EPOCH FROM (sr.closed_at - sr.created_at)) / 86400.0)
+filters:
+  - sr.closed_at IS NOT NULL
+time_column: sr.created_at
+closed_time_column: sr.closed_at
+synonyms: [days to close, time to close, resolution time, close time, 平均关闭天数]
+notes: Calendar days. SLA targets are in business days, so do not compare the two directly.
+# Reference: calendar days, trailing 12 months.
+replay:
+  time_window: trailing_12m
+  expected: 3.6033
+  tolerance: 0.001

@@ -1,0 +1,17 @@
+name: nps_score
+display_name: NPS (Proxy)
+description: Average monthly NPS proxy from the tenant health snapshots, -100 to 100.
+base_table: tenant_health_snapshots ths
+formula: AVG(ths.nps_score)
+time_column: ths.snapshot_month
+synonyms: [nps, net promoter score, nps proxy, satisfaction, 净推荐值]
+notes: >
+  There is no NPS survey in this data: the generator derived the score from the
+  tenant's breach, escalation and reopen rates that month. Treat it as NPS, but do
+  not correlate it against those three rates as if it were independent evidence.
+  For "current" NPS use snapshot_month = '2026-03-01'.
+# Reference: average nps_score over trailing-12-month snapshots, 1,440 tenant-months.
+replay:
+  time_window: trailing_12m
+  expected: 28.688
+  tolerance: 0.001

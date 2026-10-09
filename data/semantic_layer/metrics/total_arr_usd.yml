@@ -1,0 +1,14 @@
+name: total_arr_usd
+display_name: Total ARR (USD)
+description: Annual recurring revenue across active subscriptions.
+base_table: tenant_subscriptions ts
+formula: SUM(ts.arr_usd)
+filters:
+  - ts.is_active = 1
+synonyms: [arr, revenue, annual recurring revenue, 年度经常性收入]
+notes: Active contracts only. arr_usd is a float; round it for display.
+# Reference: active subscriptions; no time axis.
+replay:
+  time_window: trailing_12m
+  expected: 51948171.64
+  tolerance: 1.0

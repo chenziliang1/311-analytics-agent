@@ -1,0 +1,10 @@
+name: size_tier
+display_name: Size Tier
+expression: t.size_tier
+alias: t
+joins:
+  sr: JOIN tenants t ON t.tenant_id = sr.tenant_id
+  ts: JOIN tenants t ON t.tenant_id = ts.tenant_id
+  ths: JOIN tenants t ON t.tenant_id = ths.tenant_id
+allowed_values: [small, medium, large]
+synonyms: [city size, size, small cities, large cities, 规模]

@@ -1,0 +1,18 @@
+name: council_escalation_rate
+display_name: Council Escalation Rate
+description: Share of requests whose resident filed a council complaint within 60 days of creating it.
+base_table: service_requests sr
+joins:
+  - "LEFT JOIN (SELECT DISTINCT cc.primary_request_id AS request_id FROM citizen_complaints cc JOIN service_requests s2 ON s2.request_id = cc.primary_request_id WHERE cc.filed_at <= s2.created_at + INTERVAL '60 days') esc ON esc.request_id = sr.request_id"
+formula: 1.0 * SUM(CASE WHEN esc.request_id IS NOT NULL THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0)
+time_column: sr.created_at
+window_end_cap: 2026-04-01
+synonyms: [escalation rate, council complaints, council complaint, complaint rate, escalations, escalated, 升级率, 投诉率]
+notes: >
+  A complaint links back through citizen_complaints.primary_request_id. The window
+  ends by 2026-04-01 so every request has its full 60 days.
+# Reference: system-prompt.md section 5, both phrase groups.
+replay:
+  time_window: trailing_12m
+  expected: 0.0053
+  tolerance: 0.0002

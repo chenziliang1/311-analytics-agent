@@ -1,0 +1,48 @@
+- term: "311"
+  definition: The non-emergency city hotline. Residents report potholes, broken streetlights, missed trash pickup, graffiti, noise and fallen trees.
+  synonyms: [non-emergency line, hotline]
+- term: tenant
+  definition: One customer city or county on the platform. There are 120, across the US and Canada.
+  synonyms: [customer city]
+- term: SLA breach
+  definition: A request that took longer to close than the tenant's target in business days for its category. Recorded as a row in sla_breach_log.
+  synonyms: [breach, missed sla]
+- term: Other bucket
+  definition: The catch-all category a request falls into when the classifier's confidence is below 0.45. Routed to the general queue, which has a slower SLA.
+  synonyms: [uncategorized, catch-all]
+- term: misroute
+  definition: An Other request whose description names a specific category such as pothole or streetlight, so the classifier should have caught it.
+  synonyms: [misrouted]
+- term: vocabulary drift
+  definition: Local wording the classifier was not trained on, such as French usage in Quebec or regional slang in the Deep South. The main driver of low accuracy.
+  synonyms: [vocab drift, dialect drift]
+- term: audited prediction
+  definition: A prediction an auditor labelled with the true category. About 20 percent of predictions; accuracy is only measurable on these.
+  synonyms: [audited, ground truth]
+- term: repeat at address
+  definition: Another request at the same address within 30 days of a closure, the strongest sign the first fix did not hold.
+  synonyms: [recurrence]
+- term: council escalation
+  definition: A resident going over the hotline to a council member, the news, a lawyer or social media within 60 days of a request.
+  synonyms: [council complaint, escalation]
+- term: AI Insight Pack
+  definition: The paid add-on that turns on the classifier for a tenant. Every tenant still has audited predictions.
+  synonyms: [ai pack]
+- term: health snapshot
+  definition: >-
+    The precomputed monthly row per tenant in tenant_health_snapshots (request_count,
+    sla_breach_rate, reopen_rate, repeat_at_address_rate, classifier_accuracy,
+    council_escalation_rate, nps_score, churn_risk_band). A question about a snapshot is
+    answered by reading that table, never by recomputing the metrics from service_requests:
+    the snapshot's numbers are the ones customers were shown. "Current" health means
+    snapshot_month = '2026-03-01'.
+  synonyms: [snapshot, health check, health dashboard, health scorecard]
+  read_from: tenant_health_snapshots
+- term: NRR
+  definition: >-
+    Net revenue retention: this year's ARR from the tenants that were also customers twelve
+    months ago, over their ARR then. Not computable from this data: tenant_subscriptions
+    holds one current contract per tenant and no history, so every tenant's ARR "then" and
+    "now" is the same row and the ratio is 100% by construction. Reply CANNOT rather than
+    returning that 100%.
+  synonyms: [net revenue retention, net retention, revenue retention, 净收入留存]

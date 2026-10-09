@@ -1,0 +1,20 @@
+name: classifier_accuracy
+display_name: Classifier Accuracy
+description: Share of audited predictions where the model's top category matches the auditor's ground truth.
+base_table: model_predictions mp
+joins:
+  - JOIN service_requests sr ON sr.request_id = mp.request_id
+formula: 1.0 * SUM(CASE WHEN mp.predicted_category_id = mp.ground_truth_category_id THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0)
+filters:
+  - mp.is_audited = 1
+time_column: mp.predicted_at
+synonyms: [model accuracy, classification accuracy, classifier, accuracy, routing accuracy, 准确率, 模型准确率]
+notes: >
+  Audited rows only (about 20 percent of predictions); ground truth is NULL
+  elsewhere. Compare predicted_category_id to ground_truth_category_id, never to
+  service_requests.auto_category_id. Vocabulary drift, not city size, drives it.
+# Reference: system-prompt.md section 6, all tenants.
+replay:
+  time_window: trailing_12m
+  expected: 0.8693
+  tolerance: 0.0005

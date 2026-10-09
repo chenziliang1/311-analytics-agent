@@ -1,0 +1,10 @@
+name: vocab_drift_level
+display_name: Vocabulary Drift Level
+expression: t.vocab_drift_level
+alias: t
+joins:
+  sr: JOIN tenants t ON t.tenant_id = sr.tenant_id
+  ts: JOIN tenants t ON t.tenant_id = ts.tenant_id
+  ths: JOIN tenants t ON t.tenant_id = ths.tenant_id
+allowed_values: [low, medium, high]
+synonyms: [vocab drift, vocabulary drift, dialect, drift, 词表漂移]

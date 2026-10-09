@@ -1,0 +1,7 @@
+name: category_group
+display_name: Category Group
+expression: sc.category_group
+alias: sc
+joins:
+  sr: JOIN service_categories sc ON sc.category_id = sr.auto_category_id
+synonyms: [category groups, 类别组]

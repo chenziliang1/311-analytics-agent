@@ -1,0 +1,4 @@
+name: month
+display_name: Month
+expression: "TO_CHAR({time_column}, 'YYYY-MM')"
+synonyms: [monthly, by month, per month, month by month, trend, 每月, 月度]

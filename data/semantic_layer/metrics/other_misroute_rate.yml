@@ -1,0 +1,34 @@
+name: other_misroute_rate
+display_name: Other Misroute Rate
+description: Share of closed Other requests whose description names a specific category, i.e. the classifier missed it.
+base_table: service_requests sr
+joins:
+  - JOIN service_categories sc ON sc.category_id = sr.auto_category_id
+  - JOIN request_descriptions rd ON rd.request_id = sr.request_id
+formula: >-
+  1.0 * SUM(CASE WHEN LOWER(rd.description_text) LIKE '%pothole%'
+                   OR LOWER(rd.description_text) LIKE '%hole in road%'
+                   OR LOWER(rd.description_text) LIKE '%streetlight%'
+                   OR LOWER(rd.description_text) LIKE '%street light%'
+                   OR LOWER(rd.description_text) LIKE '%graffiti%'
+                   OR LOWER(rd.description_text) LIKE '%illegal dumping%'
+                   OR LOWER(rd.description_text) LIKE '%dumped%'
+                   OR LOWER(rd.description_text) LIKE '%noise%'
+                   OR LOWER(rd.description_text) LIKE '%fallen tree%'
+                   OR LOWER(rd.description_text) LIKE '%tree limb%'
+                 THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0)
+filters:
+  - sr.closed_at IS NOT NULL
+  - sc.is_other = 1
+time_column: sr.created_at
+closed_time_column: sr.closed_at
+synonyms: [misroute rate, misroutes, misrouted, other misroutes, other drift, other bucket, catch-all, 误分类率]
+notes: >
+  Other is service_categories.is_other = 1, routed to the slower general queue.
+  The strong category words are pothole, streetlight, graffiti, dumping, noise and
+  fallen tree; an Other request mentioning one was misrouted.
+# Reference: dataset SQL queries doc Q1, 3,100 / 26,055.
+replay:
+  time_window: trailing_12m
+  expected: 0.119
+  tolerance: 0.0005

@@ -1,0 +1,9 @@
+name: citizen_email
+display_name: Resident Email
+expression: c.email
+alias: c
+joins:
+  sr: JOIN citizens c ON c.citizen_id = sr.citizen_id
+source_column: citizens.email
+sensitive: true
+synonyms: [resident email, citizen email]

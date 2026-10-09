@@ -1,0 +1,9 @@
+name: tenant
+display_name: Tenant
+expression: t.tenant_code
+alias: t
+joins:
+  sr: JOIN tenants t ON t.tenant_id = sr.tenant_id
+  ts: JOIN tenants t ON t.tenant_id = ts.tenant_id
+  ths: JOIN tenants t ON t.tenant_id = ths.tenant_id
+synonyms: [tenants, city, cities, county, customer, client, 城市, 租户]

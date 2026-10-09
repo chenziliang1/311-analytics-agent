@@ -1,0 +1,21 @@
+name: sla_breach_rate
+display_name: SLA Breach Rate
+description: Share of closed requests that took longer than the tenant's SLA target for their category.
+base_table: service_requests sr
+joins:
+  - LEFT JOIN sla_breach_log sbl ON sbl.request_id = sr.request_id
+formula: 1.0 * SUM(CASE WHEN sbl.breach_id IS NOT NULL THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0)
+filters:
+  - sr.closed_at IS NOT NULL
+time_column: sr.created_at
+closed_time_column: sr.closed_at
+synonyms: [breach rate, sla breach, sla breaches, breached, missed sla, 超时率, 违约率]
+notes: >
+  sla_breach_log holds only breached requests, so the join must be LEFT. An inner
+  join deletes every on-time request from the denominator. The reported on-time
+  rate is 1 minus this.
+# Reference: system-prompt.md section 1.
+replay:
+  time_window: trailing_12m
+  expected: 0.2139
+  tolerance: 0.0005

@@ -1,0 +1,9 @@
+name: citizen_phone
+display_name: Resident Phone
+expression: c.phone
+alias: c
+joins:
+  sr: JOIN citizens c ON c.citizen_id = sr.citizen_id
+source_column: citizens.phone
+sensitive: true
+synonyms: [resident phone, citizen phone]

@@ -1,0 +1,24 @@
+name: true_on_time_rate
+display_name: True On-Time Rate
+description: Share of closed requests that met SLA and were not followed by a repeat at the same address within 30 days.
+base_table: service_requests sr
+joins:
+  - LEFT JOIN sla_breach_log sbl ON sbl.request_id = sr.request_id
+  - "JOIN (SELECT request_id, LEAD(created_at) OVER (PARTITION BY address_id ORDER BY created_at) AS next_at FROM service_requests WHERE address_id IS NOT NULL AND is_duplicate = 0 AND closed_at IS NOT NULL AND created_at >= '{window_start}' AND created_at < '{window_end}') nx ON nx.request_id = sr.request_id"
+formula: >-
+  1.0 * SUM(CASE WHEN sbl.breach_id IS NULL
+                  AND NOT COALESCE(nx.next_at - sr.closed_at <= INTERVAL '30 days', false)
+                 THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0)
+filters:
+  - sr.closed_at IS NOT NULL
+time_column: sr.created_at
+window_end_cap: 2026-05-01
+synonyms: [true on-time, true on time, real on-time rate, fixed on time, 真实准时率]
+notes: >
+  The reported on-time rate is 1 minus sla_breach_rate; the gap to this metric is
+  what a monthly report overstates.
+# Reference: system-prompt.md section 4 true on-time, all tenants.
+replay:
+  time_window: trailing_12m
+  expected: 0.5803
+  tolerance: 0.0005

@@ -1,0 +1,8 @@
+name: queue_type
+display_name: Queue Type
+expression: "CASE WHEN d.is_general_queue = 1 THEN 'general_queue' ELSE 'specialist' END"
+alias: d
+joins:
+  sr: JOIN departments d ON d.dept_id = sr.routed_dept_id
+allowed_values: [general_queue, specialist]
+synonyms: [general queue, specialist, department type, queue, 队列]

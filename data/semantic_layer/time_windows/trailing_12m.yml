@@ -1,0 +1,5 @@
+name: trailing_12m
+display_name: Trailing 12 Months
+start: 2025-06-01
+end: 2026-06-01
+synonyms: [last 12 months, past 12 months, past year, last year, ttm, trailing twelve months, 过去12个月, 近一年]

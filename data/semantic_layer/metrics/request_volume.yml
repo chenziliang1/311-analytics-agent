@@ -1,0 +1,12 @@
+name: request_volume
+display_name: Request Volume
+description: Number of service requests created.
+base_table: service_requests sr
+formula: COUNT(*)
+time_column: sr.created_at
+synonyms: [volume, request count, number of requests, how many requests, 请求量]
+# Reference: requests created in the trailing 12 months.
+replay:
+  time_window: trailing_12m
+  expected: 334835
+  tolerance: 0.5

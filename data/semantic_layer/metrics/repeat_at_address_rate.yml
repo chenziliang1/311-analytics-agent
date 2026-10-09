@@ -1,0 +1,22 @@
+name: repeat_at_address_rate
+display_name: Repeat at Address Rate
+description: Share of closed requests followed by another request at the same address within 30 days of closure.
+base_table: service_requests sr
+joins:
+  - "JOIN (SELECT request_id, LEAD(created_at) OVER (PARTITION BY address_id ORDER BY created_at) AS next_at FROM service_requests WHERE address_id IS NOT NULL AND is_duplicate = 0 AND closed_at IS NOT NULL AND created_at >= '{window_start}' AND created_at < '{window_end}') nx ON nx.request_id = sr.request_id"
+formula: 1.0 * SUM(CASE WHEN nx.next_at - sr.closed_at <= INTERVAL '30 days' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0)
+filters:
+  - sr.closed_at IS NOT NULL
+time_column: sr.created_at
+window_end_cap: 2026-05-01
+synonyms: [repeat rate, repeats, repeat requests, same address, recurrence, 重复报修率]
+notes: >
+  The next request is looked for among closed, non-duplicate requests in the
+  same window, as in the dataset's own definition. Duplicates and requests
+  without an address are excluded. The baseline is high
+  because a million requests share 150K addresses; compare groups with each other.
+# Reference: dataset SQL queries doc Q3 window, all closed.
+replay:
+  time_window: trailing_12m
+  expected: 0.2426
+  tolerance: 0.0005
