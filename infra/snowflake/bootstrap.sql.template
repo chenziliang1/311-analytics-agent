@@ -1,0 +1,56 @@
+-- One-time account setup for CityPulse 311 Lens on Snowflake.
+-- Run once in a Snowsight worksheet as ACCOUNTADMIN. Everything after this
+-- (tables, data, grants, the row access policy) is done by the loader user,
+-- with `python infra/snowflake/load.py`.
+--
+-- Rendered by infra/snowflake/bootstrap.py, which fills in the two public
+-- keys. Public keys are not secrets; the matching private keys never leave
+-- the machine that generated them.
+
+USE ROLE ACCOUNTADMIN;
+
+-- SMALL, suspends after 60s idle, 60s statement cap.
+CREATE WAREHOUSE IF NOT EXISTS CITYPULSE_WH
+  WAREHOUSE_SIZE = SMALL
+  AUTO_SUSPEND = 60
+  AUTO_RESUME = TRUE
+  INITIALLY_SUSPENDED = TRUE
+  STATEMENT_TIMEOUT_IN_SECONDS = 60;
+
+CREATE DATABASE IF NOT EXISTS CITYPULSE_311;
+
+-- CITYPULSE_LOADER owns the database and builds everything in it.
+-- CITYPULSE_RO is what the agent runs as: SELECT on ANALYTICS, INSERT on the
+-- query log, nothing else (granted by the loader once the objects exist).
+-- CITYPULSE_TENANT_DEMO exists to prove the row access policy: it sees one tenant.
+CREATE ROLE IF NOT EXISTS CITYPULSE_LOADER;
+CREATE ROLE IF NOT EXISTS CITYPULSE_RO;
+CREATE ROLE IF NOT EXISTS CITYPULSE_TENANT_DEMO;
+GRANT ROLE CITYPULSE_LOADER TO ROLE SYSADMIN;
+GRANT ROLE CITYPULSE_RO TO ROLE SYSADMIN;
+GRANT ROLE CITYPULSE_TENANT_DEMO TO ROLE SYSADMIN;
+
+GRANT USAGE ON WAREHOUSE CITYPULSE_WH TO ROLE CITYPULSE_LOADER;
+GRANT USAGE ON WAREHOUSE CITYPULSE_WH TO ROLE CITYPULSE_RO;
+GRANT USAGE ON WAREHOUSE CITYPULSE_WH TO ROLE CITYPULSE_TENANT_DEMO;
+GRANT OWNERSHIP ON DATABASE CITYPULSE_311 TO ROLE CITYPULSE_LOADER COPY CURRENT GRANTS;
+
+-- Service users: key-pair authentication only, no password, no MFA prompt.
+CREATE USER IF NOT EXISTS CITYPULSE_LOADER_SVC
+  TYPE = SERVICE
+  DEFAULT_ROLE = CITYPULSE_LOADER
+  DEFAULT_WAREHOUSE = CITYPULSE_WH
+  RSA_PUBLIC_KEY = '{{LOADER_PUBLIC_KEY}}';
+CREATE USER IF NOT EXISTS CITYPULSE_RO_SVC
+  TYPE = SERVICE
+  DEFAULT_ROLE = CITYPULSE_RO
+  DEFAULT_WAREHOUSE = CITYPULSE_WH
+  RSA_PUBLIC_KEY = '{{RO_PUBLIC_KEY}}';
+
+GRANT ROLE CITYPULSE_LOADER TO USER CITYPULSE_LOADER_SVC;
+GRANT ROLE CITYPULSE_RO TO USER CITYPULSE_RO_SVC;
+-- The agent's user may also take the demo role, so the policy can be shown
+-- working through the same connection the agent uses.
+GRANT ROLE CITYPULSE_TENANT_DEMO TO USER CITYPULSE_RO_SVC;
+
+SELECT 'bootstrap done' AS status;

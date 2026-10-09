@@ -1,0 +1,11 @@
+{
+  "app": "../.venv/bin/python app.py",
+  "watch": {
+    "include": ["app.py", "citypulse_infra/**"]
+  },
+  "context": {
+    "@aws-cdk/core:checkSecretUsage": true,
+    "@aws-cdk/core:defaultCrossStackReferences": "strong",
+    "@aws-cdk/aws-iam:minimizePolicies": true
+  }
+}

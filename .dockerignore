@@ -1,0 +1,16 @@
+# An allow-list for the AgentCore image (infra/docker/Dockerfile): ignore
+# everything, then name what the image needs. A deny-list would have to keep
+# up with every secret and large file the repo grows (.env, the 1 GB SQLite
+# seed, node_modules); an allow-list cannot leak what it never names.
+*
+!pyproject.toml
+!uv.lock
+!agent_app/**
+!data/**
+!.env.defaults
+!infra/docker/entrypoint.sh
+# CDK stages the context through this list before building, so the Dockerfile
+# itself has to be on it; a plain `docker build` reads it from outside.
+!infra/docker/Dockerfile
+**/__pycache__
+**/*.pyc
