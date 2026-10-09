@@ -1,8 +1,11 @@
 # -*- coding: utf-8 -*-
 
+import pytest
+
 from agent_app.one.one_00_main import one
 
 
+@pytest.mark.warehouse
 class TestDbMixin:
     def test_database_schema_str(self):
         _ = one.database_schema_str
@@ -23,6 +26,8 @@ if __name__ == "__main__":
 
 
 class TestEngines:
+    # Builds the warehouse engine, which on Snowflake reads the private key.
+    @pytest.mark.warehouse
     def test_remote_postgres_engine_is_unscoped(self):
         """
         The sync needs this one rather than `engine`: it creates the schema, so

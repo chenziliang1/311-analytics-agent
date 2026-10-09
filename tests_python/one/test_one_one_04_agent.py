@@ -19,6 +19,7 @@ from agent_app.paths import path_enum
 
 
 class TestReadOnlyTools:
+    @pytest.mark.warehouse
     def test_get_database_schema(self):
         """The schema tool returns the encoded schema, including real tables."""
         result = one.tool_get_database_schema()
@@ -26,17 +27,20 @@ class TestReadOnlyTools:
         assert "service_requests" in result
         assert "tenant_health_snapshots" in result
 
+    @pytest.mark.warehouse
     def test_execute_sql_query(self):
         """A valid SELECT comes back as a Markdown table."""
         result = one.tool_execute_sql_query(sql="SELECT COUNT(*) AS n FROM tenant_health_snapshots")
         assert "|" in result  # Markdown table pipes
         assert "n" in result
 
+    @pytest.mark.warehouse
     def test_execute_sql_query_no_rows(self):
         """A query matching nothing says so instead of returning an empty table."""
         result = one.tool_execute_sql_query(sql="SELECT 1 WHERE 1 = 0")
         assert result == "No result"
 
+    @pytest.mark.warehouse
     def test_execute_sql_query_accepts_cte(self):
         """A CTE opens with WITH, not SELECT, and must still be allowed."""
         result = one.tool_execute_sql_query(
@@ -48,11 +52,13 @@ class TestReadOnlyTools:
         assert "|" in result
         assert "n" in result
 
+    @pytest.mark.warehouse
     def test_execute_sql_query_rejects_non_select(self):
         """Write statements are refused: this agent is read-only."""
         result = one.tool_execute_sql_query(sql="DROP TABLE tenant_health_snapshots")
         assert "Invalid query" in result
 
+    @pytest.mark.warehouse
     def test_write_hidden_behind_a_cte_does_not_land(self):
         """
         SQLite accepts ``WITH x AS (...) DELETE FROM ...``, so the opening
@@ -70,6 +76,7 @@ class TestReadOnlyTools:
         after = one.tool_execute_sql_query(sql="SELECT COUNT(*) AS n FROM tenant_health_snapshots")
         assert before == after
 
+    @pytest.mark.warehouse
     def test_execute_sql_query_reports_bad_sql(self):
         """A broken query returns an error string rather than raising."""
         result = one.tool_execute_sql_query(sql="SELECT * FROM no_such_table")
