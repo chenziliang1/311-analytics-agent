@@ -1,0 +1,95 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* This app is light-only. There is no theme toggle and no `dark` class: the
+ * dark palette that used to live here, plus 121 `dark:` variants across the
+ * components, could never render and therefore could never be verified.
+ *
+ * The palette and the reasoning behind it are in `tailwind.config.ts`. */
+:root {
+  --background: #F4F6F5;
+  --foreground: #0E2A21;
+
+  /* shadcn primitives. Only the handful `components/ui/*` and
+   * `tailwind.config.ts` actually resolve are kept; the palette this app draws
+   * with is `tailwind.config.ts`, not these. */
+  --card: 0 0% 100%;
+  --card-foreground: 160 50% 11%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 160 50% 11%;
+  --destructive: 0 72% 45%;
+  --destructive-foreground: 0 0% 100%;
+  --input: 146 11% 85%;
+  --ring: 157 49% 36%;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    font-family: var(--font-body), system-ui, sans-serif;
+    background-color: var(--background);
+    color: var(--foreground);
+    @apply antialiased;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display), system-ui, sans-serif;
+    @apply font-bold tracking-tight;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: #E8EDEA;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #9CC7B5;
+  border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #2F8A68;
+}
+
+/* ---------------------------------------------------------------------------
+ * Chart tokens, read by `components/chat/blocks/chart/`.
+ *
+ * The categorical hues were run through the dataviz palette validator against
+ * this surface (light, adjacent pairs): all four inside the lightness band,
+ * above the chroma floor, >= 3:1 on white, worst CVD Delta E 19.4. Slot 1 is a
+ * chart-weight step of the brand's guide-sign green, so a single-series chart
+ * reads as this app's own. The slot ORDER is the colorblind-safety mechanism,
+ * not a cosmetic choice: assign them in order, never cycle past the last one,
+ * and re-run the validator before changing any of them.
+ *
+ * Warning yellow is deliberately absent: it means "look twice" everywhere else
+ * in the UI, and a series must not borrow a reserved meaning.
+ * ------------------------------------------------------------------------ */
+.viz-root {
+  color-scheme: light;
+  --viz-surface: #ffffff;
+  --viz-ink: #0e2a21;
+  --viz-ink-muted: #5b6b64;
+  --viz-grid: #e3e8e5;
+  --viz-axis: #b9c6bf;
+  /* Single-series bars and lines use one hue (sequential), never one hue per bar. */
+  --viz-seq: #14855e;
+  --viz-series-1: #14855e;
+  --viz-series-2: #2a78d6;
+  --viz-series-3: #eb6834;
+  --viz-series-4: #7b4fc9;
+}
