@@ -18,7 +18,8 @@ import sqlalchemy as sa
 
 from ..semantic_layer.api import Match, SemanticRegistry
 from ..sql_guard import guard_select
-from ..sql_utils import fetch_rows
+from ..sql_utils import fetch_rows, role_statements
+from ..tenant_access import TenantAccess
 from .models import WarehouseQueryOutput
 from .sql_writer import Writer, build_request, parse_reply
 
@@ -40,6 +41,11 @@ class WarehouseDeps:
     target_dialect: str | None = None
     max_rows: int = 5000
     timeout_seconds: int = 45
+    #: Which warehouse role each signed-in user's queries run as. The default
+    #: switches nothing: every query runs as the connection's own role.
+    tenant_access: TenantAccess = dataclasses.field(
+        default_factory=lambda: TenantAccess(internal_role=None)
+    )
 
 
 def _resolve(
@@ -113,12 +119,14 @@ def answer(
         Deliberately not a tool argument: a role the model fills in is a role
         the model can make up, and an audit log is only worth what it can't
         be talked into.
-    :param user_id: The signed-in user, for the audit log. Set by the agent's
-        TurnObserver, not by the model.
+    :param user_id: The signed-in user. Set by the agent's TurnObserver, not
+        by the model: it decides the warehouse role the query runs as, and
+        goes in the audit log.
     :param session_id: The chat it was asked in, for the audit log.
     """
     started = time.monotonic()
     version = deps.registry.version
+    decision = deps.tenant_access.role_for(user_id)
     match, unresolved = _resolve(
         deps.registry, intent, requested_metrics, requested_dimensions, time_window
     )
@@ -135,6 +143,8 @@ def answer(
                 "user_id": user_id or "anonymous",
                 "session_id": session_id or None,
                 "user_role": user_role,
+                # The warehouse role the query ran as; None is the connection's own.
+                "query_role": decision.role,
                 "intent": intent,
                 "metrics": [m.name for m in match.metrics],
                 "unresolved_names": unresolved,
@@ -146,6 +156,28 @@ def answer(
             }
         )
         return output
+
+    if decision.refused:
+        # Before the writer is asked: no SQL is written for a user who may not
+        # run any, and the refusal is logged with the question.
+        return finish(WarehouseQueryOutput(
+            status="blocked",
+            warning=f"Refused: {decision.refused}.",
+            semantic_layer_version=version,
+        ))
+    run_as = {}
+    if decision.switch:
+        run_as = dict(role=decision.role, restore_role=deps.tenant_access.internal_role)
+        try:
+            # A warehouse that cannot switch roles cannot run this user's
+            # query at all; found out here, not after the writer was paid.
+            role_statements(deps.engine.dialect.name, **run_as)
+        except ValueError as e:
+            return finish(WarehouseQueryOutput(
+                status="blocked",
+                warning=f"Refused: {e}.",
+                semantic_layer_version=version,
+            ))
 
     previous_sql = previous_error = None
     for attempt in range(2):
@@ -214,11 +246,11 @@ def answer(
                 semantic_layer_version=version,
             ))
 
-        result = fetch_rows(deps.engine, guarded.sql, deps.max_rows, deps.timeout_seconds)
+        result = fetch_rows(deps.engine, guarded.sql, deps.max_rows, deps.timeout_seconds, **run_as)
         if result.transient:
             # The connection dropped, not the query: the same SQL, once more.
             # No writer call -- there is nothing for it to fix.
-            result = fetch_rows(deps.engine, guarded.sql, deps.max_rows, deps.timeout_seconds)
+            result = fetch_rows(deps.engine, guarded.sql, deps.max_rows, deps.timeout_seconds, **run_as)
         if result.timed_out:
             return finish(WarehouseQueryOutput(
                 status="timeout",

@@ -93,6 +93,7 @@ def _build_default_deps() -> WarehouseDeps:  # pragma: no cover - needs a databa
         allowed_tables=allowed,
         dialect="postgres",
         target_dialect=one.sql_dialect,
+        tenant_access=one.config.tenant_access,
         writer=model_writer(
             one.sql_writer_model,
             writer_system_prompt(

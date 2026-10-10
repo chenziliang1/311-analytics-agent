@@ -35,6 +35,8 @@ The decision I would make again: **the agent never writes SQL.** A dedicated wri
 
 Read-only is enforced three times. sqlglot parses every query and rejects writes, extra statements, unknown tables and residents' personal data. The Snowflake role can only SELECT. Every transaction is rolled back.
 
+Tenant scope is the warehouse's job, not the prompt's. A row access policy on every table with a `tenant_id` decides what a query sees by the session's role: the agent's own role sees all 120 tenants, and a role mapped to one tenant sees that tenant, in the per-request tables (descriptions, events, work orders) as well as in the requests. With `TENANT_ROLE_MAP` set, the query tool runs each signed-in user's SQL as their mapped role and puts the connection back afterwards; a user the map does not name gets the default role or is refused. The audit log is always written as the agent's own role.
+
 ## What I learned
 
 **The model matters more than I expected.** With Amazon Nova Lite as the agent, SQL accuracy on the golden set was 61%. With Claude Sonnet it was 97%, using the same prompts, tools and data. Most of the gap came from follow-up questions: Nova answered them from the previous turn's text instead of running a new query, which produced confident numbers that no query had produced.

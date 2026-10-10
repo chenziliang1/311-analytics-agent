@@ -107,11 +107,36 @@ def _plain(value):
     return value
 
 
+def role_statements(dialect: str, role: str, restore_role: str | None) -> tuple[list[str], list[str]]:
+    """
+    The statements that run a query as ``role``: (before it, after it).
+
+    Snowflake's ``USE ROLE`` is session-wide and outlives the transaction, so
+    the connection must be put back to ``restore_role`` before the pool hands
+    it to the next caller; without a role to restore, the caller discards the
+    connection instead. PostgreSQL's ``SET LOCAL ROLE`` ends with the
+    transaction, which the rolled-back query always ends. Any other warehouse
+    has no roles to switch, and the query must not run unscoped.
+    """
+    from .tenant_access import check_role_name
+
+    check_role_name(role)
+    if dialect == "snowflake":
+        if restore_role:
+            check_role_name(restore_role, "restore role")
+        return [f"USE ROLE {role}"], [f"USE ROLE {restore_role}"] if restore_role else []
+    if dialect == "postgresql":
+        return [f"SET LOCAL ROLE {role}"], []
+    raise ValueError(f"the {dialect} warehouse has no roles; cannot run as {role}")
+
+
 def fetch_rows(
     engine: "sa.Engine",
     sql: str,
     max_rows: int,
     timeout_seconds: int | None = None,
+    role: str | None = None,
+    restore_role: str | None = None,
 ) -> QueryRows:
     """
     Run a read-only query and return at most ``max_rows`` rows as plain values.
@@ -119,8 +144,18 @@ def fetch_rows(
     The same rolled-back transaction as :func:`execute_sql_query`, so this is
     read-only for the same reason. ``timeout_seconds`` becomes PostgreSQL's
     ``statement_timeout`` for this transaction only; other engines ignore it.
-    Never raises.
+    With ``role``, the query runs as that warehouse role (see
+    :func:`role_statements`) and the connection is returned to
+    ``restore_role`` afterwards, or discarded if that cannot be done: a pooled
+    connection left on a tenant's role would scope the next user's query
+    wrongly in either direction. Never raises.
     """
+    before, after = [], []
+    if role:
+        try:
+            before, after = role_statements(engine.dialect.name, role, restore_role)
+        except ValueError as e:
+            return QueryRows([], [], False, error=str(e))
     try:
         conn = engine.connect()
     except sa_exc.OperationalError as e:
@@ -128,6 +163,8 @@ def fetch_rows(
         return QueryRows([], [], False, error=e._message(), transient=True)
     with conn:
         try:
+            for statement in before:
+                conn.exec_driver_sql(statement)
             if timeout_seconds and engine.dialect.name == "postgresql":
                 conn.exec_driver_sql(
                     f"SET LOCAL statement_timeout = '{int(timeout_seconds)}s'"
@@ -167,11 +204,32 @@ def fetch_rows(
         finally:
             if conn.in_transaction():
                 conn.rollback()
+            if role and engine.dialect.name == "snowflake":
+                _restore_role(conn, after)
     return QueryRows(
         columns=columns,
         rows=[[_plain(v) for v in r] for r in records[:max_rows]],
         truncated=len(records) > max_rows,
     )
+
+
+def _restore_role(conn: "sa.Connection", after: list[str]) -> None:
+    """
+    Put a Snowflake connection back on its own role, or throw it away.
+
+    Nothing here may raise: the query's result is already decided, and a
+    connection that cannot be trusted is simply not returned to the pool.
+    """
+    try:
+        if not after:
+            raise RuntimeError("no role to restore")
+        for statement in after:
+            conn.exec_driver_sql(statement)
+    except Exception:
+        try:
+            conn.invalidate()
+        except Exception:  # pragma: no cover - already being discarded
+            pass
 
 
 def execute_sql_query(
