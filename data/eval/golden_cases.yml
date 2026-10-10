@@ -1570,3 +1570,92 @@
     - request_count
   metrics:
   - request_volume
+
+# Plain metric questions: one defined metric, a defined window, at most a
+# defined dimension, nothing else. The kind the home page's suggestions ask and
+# the kind FAST_PATH compiles; the reference is the semantic layer's own
+# compiled query, so both paths are graded against the same definition.
+- id: P01-breach-rate-by-size-tier
+  source: semantic layer, compile_metric(sla_breach_rate, trailing_12m, [size_tier])
+  questions:
+  - What is the SLA breach rate by size tier over the last 12 months?
+  - SLA breach rate per size tier, last 12 months.
+  reference_sql: |
+    SELECT t.size_tier AS size_tier,
+           COUNT(*) AS base_rows,
+           1.0 * SUM(CASE WHEN sbl.breach_id IS NOT NULL THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0) AS sla_breach_rate
+    FROM service_requests sr
+    LEFT JOIN sla_breach_log sbl ON sbl.request_id = sr.request_id
+    JOIN tenants t ON t.tenant_id = sr.tenant_id
+    WHERE sr.closed_at IS NOT NULL
+      AND sr.created_at >= '2025-06-01' AND sr.created_at < '2026-06-01'
+    GROUP BY t.size_tier
+    ORDER BY sla_breach_rate DESC
+  match:
+    labels:
+    - size_tier
+    values:
+    - sla_breach_rate
+  metrics:
+  - sla_breach_rate
+- id: P02-request-volume-by-channel
+  source: semantic layer, compile_metric(request_volume, trailing_12m, [channel])
+  questions:
+  - Request volume by channel over the last 12 months.
+  - How many requests came in through each channel in the past 12 months?
+  reference_sql: |
+    SELECT ic.channel_code AS channel,
+           COUNT(*) AS base_rows,
+           COUNT(*) AS request_volume
+    FROM service_requests sr
+    JOIN intake_channels ic ON ic.channel_id = sr.channel_id
+    WHERE sr.created_at >= '2025-06-01' AND sr.created_at < '2026-06-01'
+    GROUP BY ic.channel_code
+    ORDER BY request_volume DESC
+  match:
+    labels:
+    - channel
+    values:
+    - request_volume
+  metrics:
+  - request_volume
+- id: P03-reopen-rate-overall
+  source: semantic layer, compile_metric(reopen_rate, trailing_12m)
+  questions:
+  - What is the reopen rate over the last 12 months?
+  - Overall reopen rate, past 12 months.
+  reference_sql: |
+    SELECT COUNT(*) AS base_rows,
+           1.0 * SUM(CASE WHEN re.request_id IS NOT NULL THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0) AS reopen_rate
+    FROM service_requests sr
+    LEFT JOIN (SELECT DISTINCT request_id FROM request_events WHERE event_type = 'reopened') re ON re.request_id = sr.request_id
+    WHERE sr.closed_at IS NOT NULL
+      AND sr.created_at >= '2025-06-01' AND sr.created_at < '2026-06-01'
+  match:
+    values:
+    - reopen_rate
+  metrics:
+  - reopen_rate
+- id: P04-accuracy-by-drift
+  source: semantic layer, compile_metric(classifier_accuracy, trailing_12m, [vocab_drift_level])
+  questions:
+  - Classifier accuracy by vocabulary drift level over the last 12 months?
+  - How accurate is the classifier for low, medium and high drift tenants in the last 12 months?
+  reference_sql: |
+    SELECT t.vocab_drift_level AS vocab_drift_level,
+           COUNT(*) AS base_rows,
+           1.0 * SUM(CASE WHEN mp.predicted_category_id = mp.ground_truth_category_id THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0) AS classifier_accuracy
+    FROM model_predictions mp
+    JOIN service_requests sr ON sr.request_id = mp.request_id
+    JOIN tenants t ON t.tenant_id = sr.tenant_id
+    WHERE mp.is_audited = 1
+      AND mp.predicted_at >= '2025-06-01' AND mp.predicted_at < '2026-06-01'
+    GROUP BY t.vocab_drift_level
+    ORDER BY classifier_accuracy DESC
+  match:
+    labels:
+    - vocab_drift_level
+    values:
+    - classifier_accuracy
+  metrics:
+  - classifier_accuracy

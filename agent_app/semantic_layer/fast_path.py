@@ -56,8 +56,8 @@ def _phrases(name: str, display_name: str, synonyms: T.Iterable[str]) -> list[st
     return sorted({p.lower() for p in phrases if p}, key=len, reverse=True)
 
 
-def residue(intent: str, registry: SemanticRegistry, match: Match) -> list[str]:
-    """The words of ``intent`` that neither the matched vocabulary nor filler accounts for."""
+def unmatched_text(intent: str, match: Match) -> str:
+    """``intent`` with every matched phrase blanked out: what the layer did not account for."""
     text = intent.lower()
     phrases: list[str] = []
     for m in match.metrics:
@@ -70,7 +70,12 @@ def residue(intent: str, registry: SemanticRegistry, match: Match) -> list[str]:
         phrases += _phrases(g.term, g.term, g.synonyms)
     for phrase in sorted(set(phrases), key=len, reverse=True):
         text = re.sub(r"(?<!\w)" + re.escape(phrase) + r"(?!\w)", " ", text)
-    return [word for word in _WORD.findall(text) if word not in FILLER]
+    return text
+
+
+def residue(intent: str, registry: SemanticRegistry, match: Match) -> list[str]:
+    """The words of ``intent`` that neither the matched vocabulary nor filler accounts for."""
+    return [word for word in _WORD.findall(unmatched_text(intent, match)) if word not in FILLER]
 
 
 def plan_fast_path(registry: SemanticRegistry, intent: str, match: Match) -> FastPlan | None:
@@ -86,10 +91,15 @@ def plan_fast_path(registry: SemanticRegistry, intent: str, match: Match) -> Fas
         # A term answered from its own table (a health snapshot): the metric
         # would recompute what that table holds.
         return None
-    if _DIGIT.search(intent) or _QUOTE.search(intent):
+    # Digits and quotes are judged on what is left once the matched phrases
+    # are gone: the 12 in "last 12 months" names a window the layer defines,
+    # the 2026 in "May 2026" or the 50 in "at least 50" does not. On the
+    # first eval with the gate on, every question with a defined window was
+    # turned away by its own digit, and the fast path never ran.
+    left_text = unmatched_text(intent, match)
+    if _DIGIT.search(left_text) or _QUOTE.search(left_text):
         return None
-    left = residue(intent, registry, match)
-    if left:
+    if residue(intent, registry, match):
         return None
     metric = match.metrics[0]
     dimensions = [d.name for d in match.dimensions]
