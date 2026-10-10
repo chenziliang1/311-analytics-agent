@@ -316,6 +316,7 @@ export function Chat({ site }: { site: SiteConfig }) {
             key={message.id}
             site={site}
             message={message}
+            chatId={session.id}
             append={append}
             // Not on the answer still streaming in.
             onFeedback={

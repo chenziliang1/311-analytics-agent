@@ -144,6 +144,13 @@ feedbackSend = "Send"
 feedbackThanks = "Thanks, noted."
 feedbackFailed = "Couldn't save that. Try again."
 
+# The panel a citation chip ([KB:metric/...] in an answer) opens to show the
+# definition the agent cited.
+[chat.citation]
+loading = "Reading the definition…"
+failed = "Couldn't load this definition. It may not exist, or it may not be yours to read."
+close = "Close"
+
 # What the spinner says while a turn runs, one line per step the backend
 # reports. The step names are the tool names, so a new tool needs a line here.
 [chat.status]
