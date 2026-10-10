@@ -236,6 +236,19 @@ def test_summary_and_render():
     assert "W01-defects" in render(summary)
 
 
+def test_intervals_say_how_little_a_small_run_proves():
+    from agent_app.eval.report import wilson_interval
+
+    lo, hi = wilson_interval(2, 35)
+    assert lo < 0.02 and 0.15 < hi < 0.25  # 2 of 35: anywhere from under 2% to around 19%
+    assert wilson_interval(0, 0) is None
+    assert wilson_interval(35, 35)[1] == 1.0
+    good = scripted_chat("Oslo 34.6%. [KB:metric/defect_rate]", [{"status": "ok", "rows": [["oslo", 0.346], ["lima", 0.306]]}])
+    summary = summarize(run_all([CASE], good, lambda sql: (COLS, ROWS), None))
+    assert summary["intervals"]["sql_accuracy"] == wilson_interval(1, 1)
+    assert "95% CI" in render(summary)
+
+
 def test_results_file_records_each_run(tmp_path):
     import datetime
 

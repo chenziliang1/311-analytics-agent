@@ -42,10 +42,18 @@ def test_chart_spec_numbers_count_as_handed_over():
     assert unverified_numbers("1,204 widgets, chart at 320 px.", results) == []
 
 
-def test_a_derived_ratio_is_flagged_not_blocked():
-    """Over-reports on purpose: the UI says "check if derived", never "wrong"."""
+def test_one_step_arithmetic_on_two_results_is_not_flagged():
+    """A ratio, a difference, a share: the agent doing its job, not inventing."""
+    results = [query([["north", 1200], ["south", 300], ["rate_a", 0.784], ["rate_b", 0.58]])]
+    answer = "North made 1,200, 4.0 times south's 300, so 900 more; south is 20% of north. The gap is 20.4 points."
+    assert unverified_numbers(answer, results) == []
+
+
+def test_two_steps_of_arithmetic_are_still_flagged():
+    """Over-reports past one step on purpose: the UI says "check if derived", never "wrong"."""
     results = [query([["north", 1200], ["south", 300]])]
-    assert unverified_numbers("North made 1,200, four times south's 300; a 75% share.", results) == ["75%"]
+    # 1200 / (1200 + 300) needs a sum and then a ratio.
+    assert unverified_numbers("North is 80% of the total.", results) == ["80%"]
 
 
 def test_a_bare_year_is_a_date_not_a_result():

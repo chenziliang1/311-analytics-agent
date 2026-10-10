@@ -35,6 +35,28 @@ def _rate(flags: list[bool | None]) -> float | None:
     return sum(known) / len(known) if known else None
 
 
+def wilson_interval(successes: int, n: int, z: float = 1.96) -> tuple[float, float] | None:
+    """
+    The 95% Wilson score interval for a rate of ``successes`` in ``n``.
+
+    Thirty-five runs cannot tell 3% from 6%: one hallucination either side of
+    the gate. The interval says so next to the point estimate, where a reader
+    deciding whether a run "passed" will see it.
+    """
+    if n == 0:
+        return None
+    p = successes / n
+    denominator = 1 + z * z / n
+    centre = (p + z * z / (2 * n)) / denominator
+    spread = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / denominator
+    return (max(0.0, centre - spread), min(1.0, centre + spread))
+
+
+def _interval(flags: list[bool | None]) -> tuple[float, float] | None:
+    known = [f for f in flags if f is not None]
+    return wilson_interval(sum(known), len(known))
+
+
 def _percentile(values: list[float], q: float) -> float | None:
     if not values:
         return None
@@ -53,6 +75,12 @@ def summarize(scores: list[CaseScore]) -> dict:
         "p50_latency_seconds": _percentile(latencies, 0.5),
         "p95_latency_seconds": _percentile(latencies, 0.95),
     }
+    intervals = {
+        "sql_accuracy": _interval([s.sql_ok for s in scores]),
+        "answer_accuracy": _interval([s.answer_ok for s in scores]),
+        "hallucination_rate": _interval([s.hallucinated for s in scores]),
+        "citation_rate": _interval([s.cited for s in scores]),
+    }
     gates = {}
     for name, (threshold, higher) in THRESHOLDS.items():
         value = metrics[name]
@@ -61,6 +89,7 @@ def summarize(scores: list[CaseScore]) -> dict:
         "runs": len(scores),
         "errors": sum(1 for s in scores if s.error),
         "metrics": metrics,
+        "intervals": intervals,
         "thresholds": {k: v[0] for k, v in THRESHOLDS.items()},
         "passed": gates,
         "cases": [dataclasses.asdict(s) for s in scores],
@@ -130,6 +159,9 @@ def render(summary: dict) -> str:
         if threshold is not None:
             target = f"(target {'<=' if name in ('hallucination_rate', 'p95_latency_seconds') else '>='} "
             target += f"{threshold:.0f}s)" if "latency" in name else f"{threshold:.0%})"
+        interval = (summary.get("intervals") or {}).get(name)
+        if interval and value is not None:
+            target += f"  95% CI {interval[0]:.0%}-{interval[1]:.0%}"
         lines.append(f"  {mark:4s}  {name:22s} {shown:>7s}  {target}")
     lines.append("")
     for case in summary["cases"]:

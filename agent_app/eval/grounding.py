@@ -3,10 +3,11 @@
 """
 Which numbers in an answer did no tool ever return?
 
-The cheap half of the hallucination check. It over-reports on purpose -- a
-ratio the agent derived ("25 times more likely") is not in any result and is
-not a hallucination -- so its output is evidence handed to the judge, not a
-verdict.
+The cheap half of the hallucination check. A number that no result holds and
+that is not one step of arithmetic on two results is reported; what it cannot
+tell is whether the arithmetic was the right arithmetic, or whether a
+sentence miscounts the rows ("three of them are in Quebec"). So its output is
+evidence handed to the judge, not a verdict.
 """
 
 import re
@@ -38,6 +39,35 @@ def _supported(value: float, decimals: int, is_percent: bool, known: list[float]
     return False
 
 
+#: How many returned values a derived number is looked for among. Pairs are
+#: quadratic; past this, a result is a table nobody does arithmetic on by hand.
+_DERIVATION_VALUES = 200
+
+
+def _derived(value: float, decimals: int, is_percent: bool, known: list[float]) -> bool:
+    """
+    ``value`` is one step of arithmetic on two returned values: a difference,
+    a sum, a ratio, or a share, in units or as a percentage. "3.2 times as
+    many", "20.4 points lower" and "64% of them" are the agent doing its job,
+    not inventing; what is left after this is a number from nowhere.
+    """
+    half = 0.5 * 10 ** (-decimals) + 1e-9
+    values = list(dict.fromkeys(known))[:_DERIVATION_VALUES]
+    scales = (1.0, 100.0) if is_percent or decimals else (1.0,)
+    for i, a in enumerate(values):
+        for b in values[i + 1:]:
+            candidates = [a - b, b - a, a + b]
+            if b:
+                candidates.append(a / b)
+            if a:
+                candidates.append(b / a)
+            for c in candidates:
+                for scale in scales:
+                    if abs(c * scale - value) <= half:
+                        return True
+    return False
+
+
 def unsupported_numbers(answer: str, tool_values: T.Iterable[T.Any], question: str) -> list[str]:
     """
     Numbers shown in ``answer`` that match no tool value up to the rounding
@@ -63,6 +93,9 @@ def unsupported_numbers(answer: str, tool_values: T.Iterable[T.Any], question: s
             continue
         if _YEAR.fullmatch(token):
             continue
-        if not _supported(value, decimals, is_percent, known):
-            out.append(token)
+        if _supported(value, decimals, is_percent, known):
+            continue
+        if _derived(value, decimals, is_percent, known):
+            continue
+        out.append(token)
     return out
