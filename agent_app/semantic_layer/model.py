@@ -98,12 +98,17 @@ class Dimension(_Strict):
     allowed_values: list[str] = Field(default_factory=list)
     #: Personal data. Never selected, never shown to a model.
     sensitive: bool = False
+    #: Free text or a name that is never returned as a value, but may be
+    #: searched (LIKE), measured (LENGTH) and counted: residents' request
+    #: text is the product's signal and must stay readable to the query,
+    #: not to the reader.
+    redacted: bool = False
     synonyms: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _sensitive_names_its_column(self) -> "Dimension":
-        if self.sensitive and not self.source_column:
-            raise ValueError(f"sensitive dimension {self.name!r} needs source_column")
+        if (self.sensitive or self.redacted) and not self.source_column:
+            raise ValueError(f"sensitive or redacted dimension {self.name!r} needs source_column")
         return self
 
 

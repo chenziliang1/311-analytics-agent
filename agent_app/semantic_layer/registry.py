@@ -89,6 +89,15 @@ class SemanticRegistry:
             if d.sensitive and d.source_column
         }
 
+    @property
+    def redacted_columns(self) -> set[str]:
+        """``table.column`` of every column searched but never returned, lowercase."""
+        return {
+            d.source_column.lower()
+            for d in self.dimensions.values()
+            if d.redacted and d.source_column
+        }
+
     def match(self, text: str) -> Match:
         text = text.lower()
         return Match(

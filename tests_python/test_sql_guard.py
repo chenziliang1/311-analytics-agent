@@ -105,6 +105,51 @@ def test_personal_data_cannot_be_compared_sorted_or_joined_on(sql):
     assert not result.repairable
 
 
+REDACTED = {"part.notes"}
+
+
+def guard_redacted(sql):
+    return guard_select(sql, TABLES, SENSITIVE, redacted_columns=REDACTED)
+
+
+class TestRedactedColumns:
+    """Free text is searched, measured and counted, never returned."""
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT COUNT(*) FROM part WHERE LOWER(notes) LIKE '%crack%'",
+            "SELECT SUM(CASE WHEN LOWER(p.notes) LIKE '%crack%' THEN 1 ELSE 0 END) AS cracked FROM part p",
+            "WITH f AS (SELECT id, CASE WHEN notes LIKE '%crack%' THEN 1 ELSE 0 END AS flag FROM part) SELECT SUM(flag) FROM f",
+            "SELECT AVG(LENGTH(notes)) FROM part",
+            "SELECT COUNT(DISTINCT notes) FROM part",
+            "SELECT id FROM part ORDER BY notes",
+            "SELECT id FROM part WHERE notes = 'x'",
+        ],
+    )
+    def test_searching_measuring_and_counting_are_allowed(self, sql):
+        result = guard_redacted(sql)
+        assert not result.blocked and result.warnings == []
+
+    def test_the_value_itself_is_dropped_from_the_result_with_a_warning(self):
+        result = guard_redacted("SELECT id, notes, LOWER(notes) AS n2 FROM part")
+        assert not result.blocked
+        assert "notes" not in result.sql.split("FROM")[0]
+        assert "free text" in result.warnings[0]
+
+    def test_a_function_that_returns_the_text_is_a_leak(self):
+        result = guard_redacted("SELECT MAX(notes) FROM part")
+        assert result.blocked and "every selected column" in result.blocked_reason
+
+    def test_inside_a_subquery_it_is_refused(self):
+        result = guard_redacted("SELECT n FROM (SELECT SUBSTR(notes, 1, 40) AS n FROM part) s")
+        assert result.blocked and "free text" in result.blocked_reason
+
+    def test_star_over_a_table_with_free_text_is_refused(self):
+        assert guard_redacted("SELECT * FROM part").blocked
+        assert not guard_redacted("SELECT * FROM widget").blocked
+
+
 def test_star_over_tables_without_personal_data_is_allowed():
     assert not guard("SELECT * FROM widget").blocked
 

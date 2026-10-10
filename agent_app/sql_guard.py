@@ -77,6 +77,19 @@ _BLOCKED_FUNCTIONS = {
     "query_history_by_user",
     "login_history",
     "login_history_by_user",
+    # Session and account facts: nothing about 311, something about us.
+    "current_account",
+    "current_account_name",
+    "current_organization_name",
+    "current_user",
+    "current_ip_address",
+    "current_session",
+    "current_region",
+    "current_client",
+    "current_available_roles",
+    "current_secondary_roles",
+    "get_presigned_url",
+    "get_stage_location",
 }
 
 #: Snowflake's system functions (SYSTEM$WAIT, SYSTEM$CANCEL_QUERY, ...), all
@@ -152,6 +165,39 @@ def _harmless_reference(column: exp.Column) -> bool:
     if isinstance(parent, exp.Is) and parent.this is column and isinstance(parent.expression, exp.Null):
         return True
     return isinstance(parent, exp.Group)
+
+
+#: Where a redacted column may appear inside a projection: anything that
+#: derives a flag, a count or a size from the text without returning it.
+#: ``CASE WHEN LOWER(rd.description_text) LIKE '%pothole%' THEN 1 ...`` is the
+#: product's main analysis; ``MAX(rd.description_text)`` would be a leak.
+_DERIVING_NODES: tuple[type[exp.Expression], ...] = (
+    exp.Case,
+    exp.If,
+    exp.Like,
+    exp.ILike,
+    exp.RegexpLike,
+    exp.In,
+    exp.EQ,
+    exp.NEQ,
+    exp.GT,
+    exp.GTE,
+    exp.LT,
+    exp.LTE,
+    exp.Is,
+    exp.Count,
+    exp.Length,
+)
+
+
+def _only_derived(column: exp.Column, projection: exp.Expression) -> bool:
+    """``column``'s value cannot reach the result: a deriving node sits between it and ``projection``."""
+    node = column.parent
+    while node is not None and node is not projection.parent:
+        if isinstance(node, _DERIVING_NODES):
+            return True
+        node = node.parent
+    return False
 
 
 def _cap_rows(tree: exp.Expression, max_rows: int) -> bool:
@@ -258,12 +304,18 @@ def guard_select(
     max_rows: int = 5000,
     dialect: str = "postgres",
     target_dialect: str | None = None,
+    redacted_columns: set[str] = frozenset(),
 ) -> GuardResult:
     """
     Check ``sql`` and return the version that may run, or the reason it may not.
 
     :param allowed_tables: Base table names the query may read, lowercase.
     :param sensitive_columns: ``table.column`` personal-data columns, lowercase.
+        Never returned, never compared, sorted or joined on.
+    :param redacted_columns: ``table.column`` free text and names, lowercase.
+        Never returned as a value, but searched, measured and counted freely:
+        the result may say how many descriptions mention a pothole, never
+        what one says.
     :param max_rows: The executor fetches at most this many rows; the query is
         given a ``LIMIT`` of one more so truncation can be detected.
     :param dialect: The dialect ``sql`` is written in.
@@ -327,7 +379,8 @@ def guard_select(
                 tables,
             )
 
-    sensitive_tables = {c.split(".")[0] for c in sensitive_columns}
+    hidden_columns = set(sensitive_columns) | set(redacted_columns)
+    hidden_tables = {c.split(".")[0] for c in hidden_columns}
     warnings = []
     for select in tree.find_all(exp.Select):
         # Only the outermost SELECT's columns can be dropped without changing
@@ -338,9 +391,9 @@ def guard_select(
             if isinstance(projection, exp.Star) or (
                 isinstance(projection, exp.Column) and isinstance(projection.this, exp.Star)
             ):
-                if tables & sensitive_tables:
+                if tables & hidden_tables:
                     return _blocked(
-                        "SELECT * over a table holding personal data; list the columns instead",
+                        "SELECT * over a table holding personal data or free text; list the columns instead",
                         tables,
                     )
                 kept.append(projection)
@@ -349,16 +402,20 @@ def guard_select(
                 c.sql(dialect=dialect)
                 for c in projection.find_all(exp.Column)
                 if _is_sensitive(c, aliases, sensitive_columns, tables)
+                or (
+                    _is_sensitive(c, aliases, redacted_columns, tables)
+                    and not _only_derived(c, projection)
+                )
             ]
             if not leaked:
                 kept.append(projection)
             elif is_root:
                 warnings.append(
-                    f"Removed {', '.join(leaked)} from the result: residents' personal data is not shown."
+                    f"Removed {', '.join(leaked)} from the result: residents' personal data and free text are not shown."
                 )
             else:
                 return _blocked(
-                    f"personal data ({', '.join(leaked)}) cannot be selected", tables
+                    f"personal data or free text ({', '.join(leaked)}) cannot be selected", tables
                 )
         if not kept:
             return _blocked("every selected column was personal data", tables)

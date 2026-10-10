@@ -56,7 +56,7 @@ def parse_reply(reply: str) -> ParsedReply:
 def _describe_match(registry: SemanticRegistry, match: Match) -> list[str]:
     lines = []
     window = match.time_windows[0].name if match.time_windows else None
-    dims = [d.name for d in match.dimensions if not d.sensitive]
+    dims = [d.name for d in match.dimensions if not (d.sensitive or d.redacted)]
 
     # Terms first: a term can overrule every reference query below it (a
     # health snapshot is read from its table, not recomputed from the metrics).
@@ -97,6 +97,12 @@ def _describe_match(registry: SemanticRegistry, match: Match) -> list[str]:
         if d.sensitive:
             lines.append(
                 f"### `{d.name}` is residents' personal data and must not be selected."
+            )
+            continue
+        if d.redacted:
+            lines.append(
+                f"### `{d.expression}` is free text or a name: search it (LIKE), measure it, "
+                "count it, but never select or return it."
             )
             continue
         lines.append(f"### Dimension `{d.name}` ({d.display_name}): `{d.expression}`")

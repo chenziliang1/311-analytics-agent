@@ -1,0 +1,9 @@
+name: crew_note_text
+display_name: Crew Note Text
+expression: n.note_text
+alias: n
+joins:
+  sr: JOIN work_orders w ON w.request_id = sr.request_id JOIN work_order_notes n ON n.work_order_id = w.work_order_id
+source_column: work_order_notes.note_text
+redacted: true
+synonyms: [note text, crew notes, work order notes]

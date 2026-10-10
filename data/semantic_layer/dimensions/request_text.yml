@@ -1,0 +1,11 @@
+name: request_text
+display_name: Resident Request Text
+# Never returned as a value: searched with LIKE, measured, counted. The
+# keyword analyses read it; the reader never sees what a resident wrote.
+expression: rd.description_text
+alias: rd
+joins:
+  sr: JOIN request_descriptions rd ON rd.request_id = sr.request_id
+source_column: request_descriptions.description_text
+redacted: true
+synonyms: [description text, request description, what the resident wrote]
