@@ -9,8 +9,13 @@
 /** A marker: `[KB:<kind>/<key>]`, the id as agent_app/knowledge.py spells it. */
 export const CITATION = /\[KB:([a-z_]+\/[A-Za-z0-9_\-]+)\]/g;
 
-/** The href scheme a marker becomes, which the Markdown renderer recognises. */
-export const CITATION_SCHEME = "kb:";
+/**
+ * The href a marker becomes, which the Markdown renderer recognises. A
+ * fragment, like `#ask:`, on purpose: react-markdown's default URL transform
+ * drops any scheme it does not know, so a `kb:` href arrived empty and the
+ * citation rendered as an ordinary link that opened the page in a new tab.
+ */
+export const CITATION_SCHEME = "#kb:";
 
 /** Every marker in `text` rewritten as a Markdown link the renderer turns into a chip. */
 export function linkCitations(text: string): string {
