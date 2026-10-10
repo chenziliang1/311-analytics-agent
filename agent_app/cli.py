@@ -80,6 +80,114 @@ class Cli:
         path_enum.path_llms_txt.write_text(index, encoding="utf-8")
         print(f"Wrote {path_enum.path_llms_txt} ({index.count(chr(10))} lines)")
 
+    def canary(self, target: str = "remote", publish: bool = False, cases: T.Any = "") -> None:
+        """
+        Ask the agent the canary questions (data/eval/canary.yml) and check
+        each answer against the figure the semantic layer computes itself.
+
+        Exits 1 when any question fails. The report goes to tmp/canary/.
+
+        :param target: ``remote`` asks the deployed agent (AGENTCORE_RUNTIME_ARN
+            and AWS credentials that may invoke it); ``local`` runs the agent in
+            this process, which spends model calls here.
+        :param publish: Also publish CanaryQuestions and CanaryFailures to
+            CloudWatch (METRICS_NAMESPACE), which the dashboard's alarm watches.
+        :param cases: Comma-separated case ids, or prefixes, to run a subset.
+        """
+        from agent_app import canary as c
+        from agent_app.api import one
+        from agent_app.paths import path_enum
+        from agent_app.semantic_layer.api import load_registry
+
+        registry = load_registry(path_enum.dir_semantic_layer)
+        wanted = _as_word_list(cases)
+        selected = [
+            case for case in c.load_canary_cases(path_enum.path_canary_yml, registry)
+            if not wanted or any(case.id == w or case.id.startswith(w) for w in wanted)
+        ]
+        if target == "remote":
+            arn = one.config.agentcore_runtime_arn
+            if not arn:
+                raise SystemExit("AGENTCORE_RUNTIME_ARN is not set; nothing to ask. Use --target local to run the agent here.")
+            ask = c.remote_ask(one.bedrock_agentcore_client(), arn)
+        elif target == "local":
+            ask = c.local_ask()
+        else:
+            raise SystemExit(f"--target must be remote or local, not {target!r}")
+        print(f"Canary: {len(selected)} questions to the {target} agent\n")
+        results = c.run(selected, ask, c.compiled_reference(one.engine, registry, one.sql_dialect))
+        print(c.render(results))
+        report = c.summary(results, target)
+        print(f"\nReport: {c.write_report(path_enum.dir_canary_reports, report)}")
+        if publish:
+            c.publish(one.metrics("canary"), results)
+            print("Published CanaryQuestions and CanaryFailures.")
+        raise SystemExit(1 if report["failed"] else 0)
+
+    def switch(self, action: str = "show", name: str = "", on: bool = False, reason: str = "") -> None:
+        """
+        Read or flip the operator's switches (agent_app/switches.py), which the
+        warehouse tool re-reads every SWITCH_TTL seconds: no deployment.
+
+            agent-app switch                          # what is thrown now
+            agent-app switch set --name kill --on --reason "load failed at 03:00"
+            agent-app switch set --name suspend:sla_breach_rate --on --reason "definition under review"
+            agent-app switch set --name kill            # off
+
+        Writes as the loader (its key under ~/.snowflake/citypulse/), because
+        the agent's own role may only read the table.
+
+        :param action: ``show`` or ``set``.
+        :param name: ``kill`` or ``suspend:<metric>``.
+        :param on: Throw the switch; without it, the switch is cleared.
+        :param reason: Shown to users in the refusal. Required with --on.
+        """
+        import getpass
+        import os
+        from pathlib import Path
+
+        import snowflake.connector
+
+        from agent_app.api import one
+        from agent_app.switches import KILL, SUSPEND, Switches, upsert_sql
+
+        config = one.config
+        table = config.switch_table
+        if not table:
+            raise SystemExit("SWITCH_TABLE is not set.")
+        key_path = Path(os.environ.get("SNOWFLAKE_LOADER_KEY_PATH", "~/.snowflake/citypulse/loader_rsa_key.p8")).expanduser()
+        conn = snowflake.connector.connect(
+            account=config.snowflake_account,
+            user=os.environ.get("SNOWFLAKE_LOADER_USER", "CITYPULSE_LOADER_SVC"),
+            private_key_file=str(key_path),
+            role=os.environ.get("SNOWFLAKE_LOADER_ROLE", "CITYPULSE_LOADER"),
+            warehouse=config.snowflake_warehouse,
+            database=config.snowflake_database,
+        )
+        cur = conn.cursor()
+        qualified = table if table.count(".") == 2 else f"{config.snowflake_database}.{table}"
+        if action == "set":
+            if not name or not (name == KILL or (name.startswith(SUSPEND) and len(name) > len(SUSPEND))):
+                raise SystemExit("--name must be kill or suspend:<metric>")
+            if on and not reason:
+                raise SystemExit("--reason is required when throwing a switch: users will read it.")
+            cur.execute(upsert_sql(qualified), {
+                "name": name, "value": "on" if on else "off", "reason": reason or None,
+                "changed_by": getpass.getuser(),
+            })
+            conn.commit()
+            print(f"{name} = {'on' if on else 'off'}; the tool sees it within {config.switch_ttl_seconds:.0f}s")
+        elif action != "show":
+            raise SystemExit("action must be show or set")
+        rows = cur.execute(f"SELECT name, value, reason, changed_at, changed_by FROM {qualified} ORDER BY name").fetchall()
+        conn.close()
+        switches = Switches.from_rows(rows)
+        print(f"kill: {'ON, ' + switches.killed if switches.killed else 'off'}")
+        print(f"suspended metrics: {dict(switches.suspended) or 'none'}")
+        for row in rows:
+            print(f"  {row[0]:28s} {row[1]:4s} {row[3]}  {row[4] or ''}  {row[2] or ''}")
+        raise SystemExit(0)
+
     def test_db_conn(self) -> None:
         """
         Prove this machine can reach the cloud PostgreSQL, and nothing else.

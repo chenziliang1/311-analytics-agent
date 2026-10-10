@@ -686,3 +686,33 @@ class TestTenantScope:
         out = answer(deps, "how many widgets", user_id="anyone")
         assert out.status == "blocked" and out.rows == [] and "no roles" in out.warning
         assert writer.requests == []
+
+
+class TestSwitches:
+    """The operator's switches are read before any SQL is written."""
+
+    def test_kill_blocks_every_question_without_a_writer_call(self, engine, registry):
+        from agent_app.switches import Switches
+
+        writer = ScriptedWriter(sql("SELECT 1"))
+        deps = make_deps(engine, registry, writer, [])
+        deps = dataclasses.replace(deps, switches=lambda: Switches(killed="load failed at 03:00"))
+        out = answer(deps, "defects by line in the first quarter")
+        assert out.status == "blocked"
+        assert "temporarily unavailable: load failed at 03:00" in out.warning
+        assert writer.requests == []
+
+    def test_a_suspended_metric_is_refused_and_others_still_answer(self, engine, registry):
+        from agent_app.switches import Switches
+
+        suspended = lambda: Switches(suspended={"defect_rate": "definition under review"})
+        writer = ScriptedWriter(sql("SELECT line_code AS line, COUNT(*) AS n FROM widget GROUP BY line_code"))
+        deps = dataclasses.replace(make_deps(engine, registry, writer, []), switches=suspended)
+        out = answer(deps, "defects by line in the first quarter")
+        assert out.status == "blocked"
+        assert "suspended for now: definition under review" in out.warning
+        assert "Other metrics still work" in out.warning
+        assert writer.requests == []
+        # A question that matches no metric goes through as before.
+        out = answer(deps, "how many widgets per line")
+        assert out.status == "ok"

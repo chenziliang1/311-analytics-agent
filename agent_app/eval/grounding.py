@@ -68,6 +68,22 @@ def _derived(value: float, decimals: int, is_percent: bool, known: list[float]) 
     return False
 
 
+def answer_states(answer: str, value: float) -> bool:
+    """
+    Whether ``answer`` shows ``value`` at any rounding it uses: "12.3%" states
+    0.1234 and "1,234" states 1234.2. The canary's question: did the agent
+    say the figure the semantic layer computes?
+    """
+    text = _FENCED_SQL.sub(" ", answer or "")
+    for token in _NUMBER.findall(text):
+        shown = as_number(token.rstrip("%"))
+        if shown is None:
+            continue
+        if _supported(shown, _decimals(token), token.endswith("%"), [value]):
+            return True
+    return False
+
+
 def unsupported_numbers(answer: str, tool_values: T.Iterable[T.Any], question: str) -> list[str]:
     """
     Numbers shown in ``answer`` that match no tool value up to the rounding

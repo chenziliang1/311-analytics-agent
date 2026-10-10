@@ -264,6 +264,10 @@ class Config:
     #: asking the SQL writer (semantic_layer.fast_path). Off by default; the
     #: eval with it on and off decides.
     fast_path: bool = dataclasses.field(default=False)
+    #: The warehouse table of operator switches (kill, suspend:<metric>), read
+    #: every SWITCH_TTL seconds; see agent_app.switches. None: no switches.
+    switch_table: str | None = dataclasses.field(default=None)
+    switch_ttl_seconds: float = dataclasses.field(default=30.0)
     #: A warehouse table of (login, role_name) rows read as the map, refreshed
     #: every few minutes, with tenant_role_map laid over it: a customer is
     #: added by one row, not a redeploy. The loader creates
@@ -317,6 +321,10 @@ class Config:
             from .tenant_access import check_table_name
 
             check_table_name(self.tenant_role_table, "TENANT_ROLE_TABLE")
+        if self.switch_table is not None:
+            from .tenant_access import check_table_name
+
+            check_table_name(self.switch_table, "SWITCH_TABLE")
         self.warehouse = (self.warehouse or "postgres").strip().lower()
         if self.warehouse not in ("postgres", "snowflake"):
             raise ValueError(
@@ -470,6 +478,7 @@ class Config:
             tenant_default_role=get_env("TENANT_DEFAULT_ROLE") or None,
             tenant_role_table=get_env("TENANT_ROLE_TABLE") or None,
             fast_path=get_env_bool("FAST_PATH"),
+            switch_table=get_env("SWITCH_TABLE") or None,
             db_host=get_env("DB_HOST"),
             db_port=get_env_int("DB_PORT"),
             db_user=get_env("DB_USER"),

@@ -19,6 +19,8 @@ mise run dev                 # http://localhost:3000
 
 `mise run test` runs the whole test suite with no accounts at all. `mise run snowflake-load` loads the data into Snowflake, and `mise run infra-deploy` ships the agent to AWS Bedrock AgentCore. `mise run cli-grade` scores the agent on the golden set; it calls the model, so it costs money.
 
+Once deployed, two things watch it. A **canary** ([`data/eval/canary.yml`](data/eval/canary.yml)) asks the live agent six plain questions every morning and checks each figure against the one the semantic layer computes by itself; a wrong answer opens a GitHub issue and trips a CloudWatch alarm (`agent-app canary --target local` asks the same of a local agent). Two **switches** in the warehouse (`agent-app switch set --name kill --on --reason "..."`, or `--name suspend:<metric>`) stop every question or questions about one metric within 30 seconds, with the reason shown to users and no deployment.
+
 ## How it works
 
 ```

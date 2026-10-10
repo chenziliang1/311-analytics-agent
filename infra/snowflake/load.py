@@ -19,6 +19,8 @@ and check it.
             tenant_id.
     users   The login -> role table the agent reads for per-user tenant
             scope (CITYPULSE_AUDIT.USER_ROLE_ACCESS), created empty.
+    switches The operator's kill switch and per-metric suspensions
+            (CITYPULSE_AUDIT.SWITCHES), created with kill off.
     verify  Row counts against the seed, key and foreign-key orphans, RO
             refused a write, the demo role sees one tenant, in the child
             tables as well.
@@ -277,6 +279,28 @@ def step_users(conn) -> None:
     log(f"{USER_ROLE_TABLE}: {rows} login(s) mapped; CITYPULSE_RO may read it")
 
 
+#: The operator's switches (agent_app/switches.py): kill, suspend:<metric>.
+#: The agent reads it every SWITCH_TTL seconds (SWITCH_TABLE); flipping one
+#: is `agent-app switch ...`, which writes as the loader.
+SWITCH_TABLE = f"{DATABASE}.CITYPULSE_AUDIT.SWITCHES"
+
+
+def step_switches(conn) -> None:
+    cur = conn.cursor()
+    run(cur, f"""CREATE TABLE IF NOT EXISTS {SWITCH_TABLE} (
+        name VARCHAR NOT NULL,
+        value VARCHAR NOT NULL,
+        reason VARCHAR,
+        changed_at TIMESTAMP_NTZ NOT NULL,
+        changed_by VARCHAR
+    )""")
+    run(cur, f"GRANT SELECT ON TABLE {SWITCH_TABLE} TO ROLE CITYPULSE_RO")
+    if run(cur, f"SELECT COUNT(*) FROM {SWITCH_TABLE} WHERE name = 'kill'")[0][0] == 0:
+        run(cur, f"INSERT INTO {SWITCH_TABLE} VALUES ('kill', 'off', NULL, CURRENT_TIMESTAMP(), 'load.py')")
+    thrown = run(cur, f"SELECT name, reason FROM {SWITCH_TABLE} WHERE LOWER(value) IN ('on', 'true', '1', 'yes')")
+    log(f"{SWITCH_TABLE}: {len(thrown)} switch(es) thrown {thrown or ''}; CITYPULSE_RO may read it")
+
+
 def step_verify(conn, seed: sqlite3.Connection) -> bool:
     cur = conn.cursor()
     ok = True
@@ -326,7 +350,7 @@ def step_verify(conn, seed: sqlite3.Connection) -> bool:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--step", choices=["all", "raw", "model", "tenant", "secure", "users", "verify"], default="all")
+    parser.add_argument("--step", choices=["all", "raw", "model", "tenant", "secure", "users", "switches", "verify"], default="all")
     step = parser.parse_args().step
     seed_path = find_seed()
     seed = sqlite3.connect(seed_path)
@@ -342,6 +366,8 @@ def main() -> None:
         step_secure(conn)
     if step in ("all", "users"):
         step_users(conn)
+    if step in ("all", "switches"):
+        step_switches(conn)
     ok = True
     if step in ("all", "verify"):
         ok = step_verify(conn, seed)

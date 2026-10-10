@@ -64,7 +64,13 @@ class PathEnum:
     # the record behind every number the README or a resume quotes.
     path_eval_results_md = dir_data / "eval" / "results.md"
 
+    # The morning canary's questions (agent_app/canary.py).
+    path_canary_yml = dir_data / "eval" / "canary.yml"
+
     dir_tmp = dir_project_root / "tmp"
+
+    # One JSON report per `agent-app canary` run.
+    dir_canary_reports = dir_tmp / "canary"
 
     # Written by the agent's ``write_debug_report`` tool.
     path_debug_report_md = dir_tmp / "debug_report.md"

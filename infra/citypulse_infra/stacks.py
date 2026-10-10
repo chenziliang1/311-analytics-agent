@@ -204,6 +204,16 @@ class ObservabilityStack(Stack):
                 width=12,
             ),
         )
+        # The one widget about being right rather than up: the canary's
+        # failures per day, published by the morning workflow.
+        canary_failures = _metric("CanaryFailures", "canary", period=Duration.days(1))
+        dashboard.add_widgets(
+            cw.GraphWidget(
+                title="7. Canary: wrong answers per day",
+                left=[canary_failures, _metric("CanaryQuestions", "canary", period=Duration.days(1))],
+                width=12,
+            ),
+        )
 
         alarms = [
             cw.Alarm(
@@ -234,6 +244,13 @@ class ObservabilityStack(Stack):
                 # The doc's monthly cap was $600; a day at $20 is on that pace.
                 alarm_description="Estimated model spend above $20 in a day",
                 metric=daily_cost, threshold=20, evaluation_periods=1,
+                treat_missing_data=cw.TreatMissingData.NOT_BREACHING,
+            ),
+            cw.Alarm(
+                self, "CanaryFailed",
+                alarm_description="The morning canary found an answer that does not match the semantic layer's own figure",
+                metric=canary_failures, threshold=1, evaluation_periods=1,
+                comparison_operator=cw.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
                 treat_missing_data=cw.TreatMissingData.NOT_BREACHING,
             ),
         ]
@@ -288,6 +305,35 @@ class GithubDeployStack(Stack):
             iam.PolicyStatement(
                 actions=["sts:AssumeRole", "sts:TagSession"],
                 resources=[f"arn:aws:iam::{self.account}:role/cdk-{CDK_QUALIFIER}-*-{self.account}-{self.region}"],
+            )
+        )
+        # The morning canary (.github/workflows/canary.yml) runs as this role
+        # too: it asks the deployed agent its questions, finds the agent's ARN
+        # in the stack's outputs, and reports the result as a metric the
+        # dashboard's alarm watches. By name pattern rather than by reference,
+        # so this stack does not depend on the agent's.
+        role.add_to_policy(
+            iam.PolicyStatement(
+                sid="CanaryAsksTheAgent",
+                actions=["bedrock-agentcore:InvokeAgentRuntime"],
+                resources=[
+                    f"arn:aws:bedrock-agentcore:{self.region}:{self.account}:runtime/citypulse_agent*",
+                ],
+            )
+        )
+        role.add_to_policy(
+            iam.PolicyStatement(
+                sid="CanaryFindsTheAgent",
+                actions=["cloudformation:DescribeStacks"],
+                resources=[f"arn:aws:cloudformation:{self.region}:{self.account}:stack/CityPulseAgentRuntime/*"],
+            )
+        )
+        role.add_to_policy(
+            iam.PolicyStatement(
+                sid="CanaryReportsToTheDashboard",
+                actions=["cloudwatch:PutMetricData"],
+                resources=["*"],
+                conditions={"StringEquals": {"cloudwatch:namespace": METRICS_NAMESPACE}},
             )
         )
         CfnOutput(self, "DeployRoleArn", value=role.role_arn)
