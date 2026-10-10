@@ -78,6 +78,8 @@ jobs:
             backend:
               - "agent_app/**"
               - "data/**"
+              # The eval workflow commits its row here; nothing to redeploy.
+              - "!data/eval/results.md"
               - "infra/**"
               - "pyproject.toml"
               - "uv.lock"
@@ -92,6 +94,7 @@ jobs:
               - "api/**"
               - "agent_app/**"
               - "data/**"
+              - "!data/eval/results.md"
               - "package.json"
               - "pnpm-lock.yaml"
               - "next.config.js"

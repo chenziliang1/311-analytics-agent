@@ -35,6 +35,10 @@ jobs:
     timeout-minutes: 45
     env:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      # Optional. With either set, the judge is a different model family from
+      # the agent's (config picks it), instead of the agent grading itself.
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
       SNOWFLAKE_PRIVATE_KEY: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
       # Unticking "judge" gives the quick run: result matching only.
       JUDGE: ${{ inputs.judge == false && 'false' || 'true' }}

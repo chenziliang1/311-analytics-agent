@@ -335,6 +335,17 @@ def check_semantic_layer(report: Report, db_tables: set[str] | None) -> bool:
         # leaves the query tool matching nothing for every question.
         report.error("semantic-layer", f"no metrics under {path_enum.dir_semantic_layer}")
         ok = False
+    # A date an entity source hard-codes (the "current" snapshot month) must
+    # be the one the glossary states, or the two drift apart silently.
+    stated = " ".join(g.definition for g in registry.glossary)
+    for source in registry.sources.values():
+        for date in sorted(set(re.findall(r"'(\d{4}-\d{2}-\d{2})'", source.read_sql + source.list_sql))):
+            if date not in stated:
+                report.error(
+                    "semantic-layer",
+                    f"source {source.name!r} hard-codes {date}, which no glossary definition states",
+                )
+                ok = False
     if db_tables is not None:
         for name in sorted(semantic_layer_tables(registry) - db_tables):
             report.error("semantic-layer", f"reads table {name!r}, not in the warehouse")

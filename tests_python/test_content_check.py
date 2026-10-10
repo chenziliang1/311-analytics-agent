@@ -115,6 +115,36 @@ def use_tmp_repo(monkeypatch, tmp_path, prompt="", site="", context="", ddl=WIDG
     return tmp_path
 
 
+class TestSourceDatesAgreeWithTheGlossary:
+    SOURCE = """
+name: plant
+display_name: Plant profile
+description: One plant.
+list_sql: SELECT code AS key, name AS title FROM plant
+read_sql: SELECT * FROM plant WHERE code = :key AND snapshot = '{date}'
+"""
+
+    def _with_source(self, tmp_path, date, glossary):
+        layer = tmp_path / "data" / "semantic_layer"
+        (layer / "sources").mkdir(parents=True, exist_ok=True)
+        (layer / "sources" / "plant.yml").write_text(self.SOURCE.format(date=date), encoding="utf-8")
+        (layer / "glossary").mkdir(exist_ok=True)
+        (layer / "glossary" / "core.yml").write_text(glossary, encoding="utf-8")
+
+    def test_a_stated_date_passes(self, monkeypatch, tmp_path):
+        use_tmp_repo(monkeypatch, tmp_path)
+        self._with_source(tmp_path, "2026-03-01", "- term: snapshot\n  definition: Current means snapshot = '2026-03-01'.\n")
+        report = cc.Report()
+        assert cc.check_semantic_layer(report, {"widget", "plant"}) and report.errors == []
+
+    def test_a_date_the_glossary_does_not_state_fails(self, monkeypatch, tmp_path):
+        use_tmp_repo(monkeypatch, tmp_path)
+        self._with_source(tmp_path, "2026-04-01", "- term: snapshot\n  definition: Current means snapshot = '2026-03-01'.\n")
+        report = cc.Report()
+        assert not cc.check_semantic_layer(report, {"widget", "plant"})
+        assert "2026-04-01" in report.errors[0]
+
+
 class TestCheckKnowledgeIndex:
     def test_in_sync_passes(self, monkeypatch, tmp_path):
         use_tmp_repo(monkeypatch, tmp_path)
