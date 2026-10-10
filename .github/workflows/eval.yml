@@ -68,7 +68,8 @@ jobs:
           .venv/bin/agent-app grade "${args[@]}" 2>&1 | tee grade.log
       - name: Record the run
         # The row the command appended, committed as whoever ran the workflow.
-        if: steps.secrets.outputs.run == 'true'
+        # On a failed gate too: a run that failed is the one worth a record.
+        if: always() && steps.secrets.outputs.run == 'true'
         run: |
           git config user.name "${{ github.actor }}"
           git config user.email "${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com"

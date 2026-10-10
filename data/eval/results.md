@@ -8,4 +8,5 @@ hallucination <= 5%, citation >= 70%, p95 <= 15s.
 
 | Date (UTC) | Agent | SQL writer | Judge | Cases | Runs | Errors | SQL accuracy | Answer accuracy | Hallucination | Citation | p95 (s) | Note |
 | :--- | :--- | :--- | :--- | :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | :--- |
-| 2026-10-10 03:04 | anthropic/claude-sonnet-5-5 | anthropic/claude-sonnet-5-5 | off | G07-monthly-channel-volume | 1 | 0 | 100.0% |  |  | 100.0% | 9.1 | a one-case smoke run, before citation was redefined (see PR #2) |
+| 2026-10-10 00:04 | anthropic/claude-sonnet-5-5 | anthropic/claude-sonnet-5-5 | off | G07-monthly-channel-volume | 1 | 0 | 100.0% |  |  | 100.0% | 9.1 | a one-case smoke run, before citation was redefined (see PR #2) |
+| 2026-10-10 02:31 | anthropic/claude-sonnet-5-5 | anthropic/claude-sonnet-5-5 | anthropic/claude-sonnet-5-5 | all | 35 | 0 | 97.1% | 97.1% | 5.7% | 79.3% | 18.1 | first full run after the knowledge base (run 38016675397); hallucination and p95 gates failed, judge self-graded; recorded by hand because the workflow skipped the record step on failure |
