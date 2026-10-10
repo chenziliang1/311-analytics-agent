@@ -256,23 +256,29 @@ class GithubDeployStack(Stack):
 
     The account already has the GitHub OIDC provider (one per account), so it
     is referenced, not created.
+
+    :param subject_prefix: The token's ``sub`` up to the ref, as the repository
+        sends it (``gh api repos/<repo>/actions/oidc/customization/sub``). This
+        repository uses GitHub's immutable form, ``repo:<owner>@<owner id>/
+        <name>@<repo id>``: a deleted and re-created repository of the same name
+        gets a new id, so it cannot take over the role.
     """
 
-    def __init__(self, scope: Construct, id: str, *, repo: str, branch: str = "main", **kwargs):
+    def __init__(self, scope: Construct, id: str, *, subject_prefix: str, branch: str = "main", **kwargs):
         super().__init__(scope, id, **kwargs)
         provider_arn = f"arn:aws:iam::{self.account}:oidc-provider/token.actions.githubusercontent.com"
         role = iam.Role(
             self,
             "DeployRole",
             role_name="citypulse-github-deploy",
-            description=f"GitHub Actions deploys from {repo}@{branch}",
+            description=f"GitHub Actions deploys from {subject_prefix}, branch {branch}",
             max_session_duration=Duration.hours(1),
             assumed_by=iam.FederatedPrincipal(
                 provider_arn,
                 conditions={
                     "StringEquals": {
                         "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-                        "token.actions.githubusercontent.com:sub": f"repo:{repo}:ref:refs/heads/{branch}",
+                        "token.actions.githubusercontent.com:sub": f"{subject_prefix}:ref:refs/heads/{branch}",
                     }
                 },
                 assume_role_action="sts:AssumeRoleWithWebIdentity",

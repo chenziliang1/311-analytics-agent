@@ -135,7 +135,10 @@ def test_dashboard_and_four_alarms(templates):
 def test_github_deploy_role_is_main_branch_only_and_can_only_hop_to_cdk_roles():
     app = cdk.App()
     stack = GithubDeployStack(
-        app, "G", repo="acme/widgets", env=cdk.Environment(account="111122223333", region="us-east-1")
+        app,
+        "G",
+        subject_prefix="repo:acme@1/widgets@2",
+        env=cdk.Environment(account="111122223333", region="us-east-1"),
     )
     t = Template.from_stack(stack)
     t.has_resource_properties(
@@ -150,7 +153,7 @@ def test_github_deploy_role_is_main_branch_only_and_can_only_hop_to_cdk_roles():
                                 "Condition": {
                                     "StringEquals": {
                                         "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-                                        "token.actions.githubusercontent.com:sub": "repo:acme/widgets:ref:refs/heads/main",
+                                        "token.actions.githubusercontent.com:sub": "repo:acme@1/widgets@2:ref:refs/heads/main",
                                     }
                                 },
                             }

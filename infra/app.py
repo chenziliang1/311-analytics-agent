@@ -28,7 +28,12 @@ secrets = SecretsStack(app, "CityPulseSecrets", env=env)
 mcp = McpRuntimeStack(app, "CityPulseMcpRuntime", secrets=secrets, env=env)
 AgentRuntimeStack(app, "CityPulseAgentRuntime", secrets=secrets, mcp=mcp, env=env)
 ObservabilityStack(app, "CityPulseObservability", env=env)
-GithubDeployStack(app, "CityPulseGithubDeploy", repo="chenziliang1/311-analytics-agent", env=env)
+GithubDeployStack(
+    app,
+    "CityPulseGithubDeploy",
+    subject_prefix="repo:chenziliang1@229510087/311-analytics-agent@1412563101",
+    env=env,
+)
 
 cdk.Tags.of(app).add("project", "citypulse-311-lens")
 app.synth()
