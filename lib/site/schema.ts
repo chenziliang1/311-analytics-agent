@@ -119,6 +119,8 @@ export interface SiteConfig {
     status: {
       thinking: string
       warehouseQuery: string
+      listSources: string
+      readSource: string
       visualize: string
       answering: string
       /** Shown once a turn has run past the slow threshold. */
@@ -184,6 +186,8 @@ export const REQUIRED_SITE_KEYS: readonly string[] = [
   "chat.messages.feedbackFailed",
   "chat.status.thinking",
   "chat.status.warehouseQuery",
+  "chat.status.listSources",
+  "chat.status.readSource",
   "chat.status.visualize",
   "chat.status.answering",
   "chat.status.slow",

@@ -56,6 +56,13 @@ start: 2026-01-01
 end: 2026-04-01
 synonyms: [first quarter]
 """,
+    "sources/plant.yml": """
+name: plant
+display_name: Plant profile
+description: One plant, its region and head count.
+list_sql: SELECT code AS key, name AS title FROM plant ORDER BY code
+read_sql: SELECT code, name, region, headcount FROM plant WHERE code = :key
+""",
 }
 
 
@@ -80,6 +87,8 @@ def engine(tmp_path):
             "INSERT INTO widget VALUES (1,'A',1,'2026-01-02',1),(2,'A',0,'2026-01-03',1),(3,'B',0,'2026-02-01',2)"
         )
         conn.exec_driver_sql("INSERT INTO owner VALUES (1,'Ada'),(2,'Bo')")
+        conn.exec_driver_sql("CREATE TABLE plant (code TEXT, name TEXT, region TEXT, headcount INT)")
+        conn.exec_driver_sql("INSERT INTO plant VALUES ('lima','Lima','south',40),('oslo','Oslo','north',120)")
     return engine
 
 
@@ -401,6 +410,8 @@ def test_server_lists_and_calls_tools(engine, registry):
             voted = await client.call_tool("record_feedback", {"rating": "down", "comment": "wrong total"})
             bad = await client.call_tool("record_feedback", {"rating": "meh"})
             called = await client.call_tool("warehouse_query", {"intent": "how many widgets"})
+            index = await client.call_tool("list_sources", {})
+            doc = await client.call_tool("read_source", {"id": "metric/defect_rate"})
             chart = await client.call_tool(
                 "visualize",
                 {
@@ -410,10 +421,14 @@ def test_server_lists_and_calls_tools(engine, registry):
                     "series": [{"name": "s", "values": [1]}],
                 },
             )
-            return tools, called, chart, voted, bad
+            return tools, called, chart, voted, bad, index, doc
 
-    tools, called, chart, voted, bad = asyncio.run(run())
-    assert {t.name for t in tools.tools} == {"warehouse_query", "visualize", "record_feedback"}
+    tools, called, chart, voted, bad, index, doc = asyncio.run(run())
+    assert {t.name for t in tools.tools} == {
+        "warehouse_query", "list_sources", "read_source", "visualize", "record_feedback"
+    }
+    assert "- [plant/oslo](plant/oslo): Oslo" in index.structuredContent["index"]
+    assert doc.structuredContent["citation"] == "[KB:metric/defect_rate]"
     query_args = next(t for t in tools.tools if t.name == "warehouse_query").inputSchema["properties"]
     # The model never says who is asking: identity is filled in by the system.
     assert "user_role" not in query_args
@@ -481,6 +496,55 @@ def test_audit_records_who_asked(engine, registry):
     answer(make_deps(engine, registry, ScriptedWriter(sql("SELECT 1 AS n")), log), "one")
     assert log[1]["user_id"] == "anonymous"
     assert log[0]["query_role"] is None  # nothing configured: the connection's own role
+
+
+class TestKnowledgeTools:
+    """The index and a document, for one asker, over the widget shop."""
+
+    def test_a_query_returns_the_ids_to_cite(self, engine, registry):
+        writer = ScriptedWriter(sql("SELECT line_code, AVG(is_defective) AS defect_rate FROM widget GROUP BY line_code"))
+        out = answer(make_deps(engine, registry, writer, []), "defect rate per line in the first quarter")
+        assert out.status == "ok"
+        assert out.sources == ["metric/defect_rate", "window/q1"]
+
+    def test_index_lists_definitions_and_the_plants_in_the_warehouse(self, engine, registry):
+        from agent_app.mcp_server.knowledge import source_index
+
+        out = source_index(make_deps(engine, registry, ScriptedWriter(), []))
+        assert out.status == "ok"
+        assert "- [metric/defect_rate](metric/defect_rate): Defect Rate." in out.index
+        assert "- [plant/lima](plant/lima): Lima\n- [plant/oslo](plant/oslo): Oslo" in out.index
+
+    def test_a_definition_and_an_entity_are_read_and_cited(self, engine, registry):
+        from agent_app.mcp_server.knowledge import read_source
+
+        deps = make_deps(engine, registry, ScriptedWriter(), [])
+        metric = read_source(deps, "metric/defect_rate")
+        assert (metric.status, metric.title, metric.citation) == ("ok", "Defect Rate", "[KB:metric/defect_rate]")
+        assert "1.0 * SUM(w.is_defective)" in metric.text
+        plant = read_source(deps, " plant/oslo ")
+        assert (plant.status, plant.id, plant.citation) == ("ok", "plant/oslo", "[KB:plant/oslo]")
+        assert "- region: north" in plant.text and "- headcount: 120" in plant.text
+
+    @pytest.mark.parametrize("source_id", ["plant/paris", "metric/profit", "plant/oslo; drop", "nonsense", ""])
+    def test_unknown_or_unreadable_documents_do_not_exist(self, engine, registry, source_id):
+        from agent_app.mcp_server.knowledge import read_source
+
+        out = read_source(make_deps(engine, registry, ScriptedWriter(), []), source_id)
+        assert out.status == "not_found" and out.text is None
+
+    def test_a_refused_user_gets_no_index_and_no_entity(self, engine, registry):
+        from agent_app.mcp_server.knowledge import read_source, source_index
+        from agent_app.tenant_access import TenantAccess
+
+        deps = dataclasses.replace(
+            make_deps(engine, registry, ScriptedWriter(), []),
+            tenant_access=TenantAccess(internal_role="SHOP_RO", user_roles={"ada": "SHOP_PLANT_NORTH"}),
+        )
+        assert source_index(deps, user_id="cy").status == "blocked"
+        assert read_source(deps, "plant/oslo", user_id="cy").status == "blocked"
+        # Definitions are not tenant data: everyone may read them.
+        assert read_source(deps, "metric/defect_rate", user_id="cy").status == "ok"
 
 
 class TestTenantScope:

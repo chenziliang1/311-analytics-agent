@@ -29,6 +29,30 @@ class WarehouseQueryOutput(BaseModel):
     clarification: str | None = None
     #: Which version of the metric definitions produced this answer.
     semantic_layer_version: str
+    #: Knowledge-base ids of the definitions this query was built from
+    #: (metric/..., term/..., window/...). Read them with read_source and cite
+    #: them in the answer.
+    sources: list[str] = Field(default_factory=list)
+
+
+class SourceIndexOutput(BaseModel):
+    status: T.Literal["ok", "blocked", "error"]
+    #: The llms.txt: one line per document the asker may read, with its id.
+    index: str | None = None
+    warning: str | None = None
+    semantic_layer_version: str
+
+
+class SourceOutput(BaseModel):
+    status: T.Literal["ok", "not_found", "blocked", "error"]
+    id: str
+    title: str | None = None
+    #: The document, Markdown.
+    text: str | None = None
+    #: Put this marker, exactly, in the answer that rests on the document.
+    citation: str | None = None
+    warning: str | None = None
+    semantic_layer_version: str
 
 
 class ChartSeries(BaseModel):

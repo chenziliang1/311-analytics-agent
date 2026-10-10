@@ -20,15 +20,26 @@ import threading
 from mcp.server.fastmcp import FastMCP
 
 from .feedback import FEEDBACK_TOOL, Feedback, FeedbackSink
-from .models import ChartSeries, FeedbackOutput, VisualizeOutput, WarehouseQueryOutput
+from .knowledge import read_source as read_source_document
+from .knowledge import source_index
+from .models import (
+    ChartSeries,
+    FeedbackOutput,
+    SourceIndexOutput,
+    SourceOutput,
+    VisualizeOutput,
+    WarehouseQueryOutput,
+)
 from .visualize import build_chart
 from .warehouse import WarehouseDeps, answer
 
 INSTRUCTIONS = """\
 Read-only analytics over a 311 service request warehouse for 120 North American
 cities and counties. Call warehouse_query for any number, count, rate or ranking;
-it writes, checks and runs the SQL. Call visualize to turn a result into a chart
-block the user's browser draws.
+it writes, checks and runs the SQL, and returns the ids of the definitions it
+used. Call read_source to read a definition before saying what a number means,
+and cite it. Call list_sources to find an id you do not have. Call visualize to
+turn a result into a chart block the user's browser draws.
 """
 
 
@@ -206,6 +217,40 @@ def build_server(deps_factory=default_deps, feedback_factory=default_feedback_si
             user_id=user_id,
             session_id=session_id,
         )
+
+    @server.tool(name="list_sources")
+    def list_sources(user_id: str = "") -> SourceIndexOutput:
+        """
+        The knowledge base index: one line per approved definition (metrics,
+        terms, time windows, dimensions) and per entity the asker may read,
+        each with its id. Read it to find an id you do not have; for a number
+        you just queried, warehouse_query already returned the ids to cite.
+
+        Args:
+            user_id: Leave empty: filled in by the system.
+
+        Returns status ok with the index, or blocked.
+        """
+        return source_index(deps_factory(), user_id=user_id)
+
+    @server.tool(name="read_source")
+    def read_source(id: str, user_id: str = "") -> SourceOutput:
+        """
+        One knowledge base document: what a metric means and how it is
+        computed, what a term means, what a time window covers, or an
+        entity's profile (e.g. tenant/austin_tx). Read the definition behind
+        a number before you say how it was computed, and put the returned
+        citation marker, exactly, at the end of that line.
+
+        Args:
+            id: A source id as returned by warehouse_query or listed by
+                list_sources, e.g. metric/sla_breach_rate.
+            user_id: Leave empty: filled in by the system.
+
+        Returns status ok with title, text and citation; not_found when there
+        is no such document for you; blocked.
+        """
+        return read_source_document(deps_factory(), id, user_id=user_id)
 
     @server.tool(name="visualize")
     def visualize(

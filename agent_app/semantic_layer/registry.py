@@ -14,7 +14,7 @@ from pathlib import Path
 
 import yaml
 
-from .model import Dimension, GlossaryTerm, Metric, TimeWindow
+from .model import Dimension, EntitySource, GlossaryTerm, Metric, TimeWindow
 
 
 def _read_yaml(path: Path):
@@ -77,6 +77,8 @@ class SemanticRegistry:
     dimensions: dict[str, Dimension]
     time_windows: dict[str, TimeWindow]
     glossary: list[GlossaryTerm]
+    #: Knowledge-base documents read from the warehouse (see EntitySource).
+    sources: dict[str, EntitySource] = dataclasses.field(default_factory=dict)
 
     @property
     def sensitive_columns(self) -> set[str]:
@@ -127,6 +129,8 @@ def load_registry(directory: Path) -> SemanticRegistry:
     for path in sorted((directory / "glossary").glob("*.yml")):
         for entry in _read_yaml(path) or []:
             glossary.append(GlossaryTerm.model_validate(entry))
+    # Optional: a layer with nothing worth reading per row has no sources/.
+    sources = _index(_load_each(directory / "sources", EntitySource), "source")
 
     for metric in metrics.values():
         if metric.replay and metric.replay.time_window not in time_windows:
@@ -149,4 +153,5 @@ def load_registry(directory: Path) -> SemanticRegistry:
         dimensions=dimensions,
         time_windows=time_windows,
         glossary=glossary,
+        sources=sources,
     )

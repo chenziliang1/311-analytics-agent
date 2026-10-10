@@ -1,0 +1,61 @@
+# Knowledge base
+
+> The approved definitions every answer rests on, one line each. Read one with
+> read_source(id) and cite it in the answer as [KB:id]. Semantic layer version 1.0.0.
+
+## Metrics
+
+- [metric/avg_arr_per_tenant](metric/avg_arr_per_tenant): ARR per Tenant (USD). Average annual recurring revenue per tenant, from active subscriptions.
+- [metric/avg_days_to_close](metric/avg_days_to_close): Average Days to Close. Mean calendar days from creation to closure, closed requests only.
+- [metric/classifier_accuracy](metric/classifier_accuracy): Classifier Accuracy. Share of audited predictions where the model's top category matches the auditor's ground truth.
+- [metric/council_escalation_rate](metric/council_escalation_rate): Council Escalation Rate. Share of requests whose resident filed a council complaint within 60 days of creating it.
+- [metric/nps_score](metric/nps_score): NPS (Proxy). Average monthly NPS proxy from the tenant health snapshots, -100 to 100.
+- [metric/other_misroute_rate](metric/other_misroute_rate): Other Misroute Rate. Share of closed Other requests whose description names a specific category, i.e. the classifier missed it.
+- [metric/quick_close_rate](metric/quick_close_rate): Quick Close Rate. Share of closed requests closed within 24 hours of creation.
+- [metric/reopen_rate](metric/reopen_rate): Reopen Rate. Share of closed requests that were reopened at least once after closure.
+- [metric/repeat_at_address_rate](metric/repeat_at_address_rate): Repeat at Address Rate. Share of closed requests followed by another request at the same address within 30 days of closure.
+- [metric/request_volume](metric/request_volume): Request Volume. Number of service requests created.
+- [metric/sla_breach_rate](metric/sla_breach_rate): SLA Breach Rate. Share of closed requests that took longer than the tenant's SLA target for their category.
+- [metric/total_arr_usd](metric/total_arr_usd): Total ARR (USD). Annual recurring revenue across active subscriptions.
+- [metric/true_on_time_rate](metric/true_on_time_rate): True On-Time Rate. Share of closed requests that met SLA and were not followed by a repeat at the same address within 30 days.
+
+## Terms
+
+- [term/311](term/311): 311. The non-emergency city hotline. Residents report potholes, broken streetlights, missed trash pickup, graffiti, noise and fallen trees.
+- [term/tenant](term/tenant): tenant. One customer city or county on the platform. There are 120, across the US and Canada.
+- [term/sla-breach](term/sla-breach): SLA breach. A request that took longer to close than the tenant's target in business days for its category. Recorded as a row in sla_breach_log.
+- [term/other-bucket](term/other-bucket): Other bucket. The catch-all category a request falls into when the classifier's confidence is below 0.45. Routed to the general queue, which has a slower SLA.
+- [term/misroute](term/misroute): misroute. An Other request whose description names a specific category such as pothole or streetlight, so the classifier should have caught it.
+- [term/vocabulary-drift](term/vocabulary-drift): vocabulary drift. Local wording the classifier was not trained on, such as French usage in Quebec or regional slang in the Deep South. The main driver of low accuracy.
+- [term/audited-prediction](term/audited-prediction): audited prediction. A prediction an auditor labelled with the true category. About 20 percent of predictions; accuracy is only measurable on these.
+- [term/repeat-at-address](term/repeat-at-address): repeat at address. Another request at the same address within 30 days of a closure, the strongest sign the first fix did not hold.
+- [term/council-escalation](term/council-escalation): council escalation. A resident going over the hotline to a council member, the news, a lawyer or social media within 60 days of a request.
+- [term/ai-insight-pack](term/ai-insight-pack): AI Insight Pack. The paid add-on that turns on the classifier for a tenant. Every tenant still has audited predictions.
+- [term/health-snapshot](term/health-snapshot): health snapshot. The precomputed monthly row per tenant in tenant_health_snapshots (request_count, sla_breach_rate, reopen_rate, repeat_at_address_rate, classifier_accuracy, council_escalation_rate, nps_score, churn_risk_band). A question about a snapshot is answered by reading that table, never by recomputing the metrics from service_requests: the snapshot's numbers are the ones customers were shown. "Current" health means snapshot_month = '2026-03-01'.
+- [term/nrr](term/nrr): NRR. Net revenue retention: this year's ARR from the tenants that were also customers twelve months ago, over their ARR then. Not computable from this data: tenant_subscriptions holds one current contract per tenant and no history, so every tenant's ARR "then" and "now" is the same row and the ratio is 100% by construction. Reply CANNOT rather than returning that 100%.
+
+## Time windows
+
+- [window/all_history](window/all_history): All History. 2023-06-01 up to 2026-06-01, anchored on event.
+- [window/current_quarter](window/current_quarter): Current Quarter. 2026-04-01 up to 2026-07-01, anchored on event.
+- [window/prior_quarter](window/prior_quarter): Prior Quarter. 2026-01-01 up to 2026-04-01, anchored on event.
+- [window/rolling_30d](window/rolling_30d): Last 30 Days. 2026-05-01 up to 2026-06-01, anchored on closed.
+- [window/trailing_12m](window/trailing_12m): Trailing 12 Months. 2025-06-01 up to 2026-06-01, anchored on event.
+
+## Dimensions
+
+- [dimension/category](dimension/category): Service Category. Group by sc.category_name.
+- [dimension/category_group](dimension/category_group): Category Group. Group by sc.category_group.
+- [dimension/channel](dimension/channel): Intake Channel. Group by ic.channel_code. Values: web, mobile_app, ivr, social, email, walk_in.
+- [dimension/month](dimension/month): Month. Group by TO_CHAR({time_column}, 'YYYY-MM').
+- [dimension/queue_type](dimension/queue_type): Queue Type. Group by CASE WHEN d.is_general_queue = 1 THEN 'general_queue' ELSE 'specialist' END. Values: general_queue, specialist.
+- [dimension/size_tier](dimension/size_tier): Size Tier. Group by t.size_tier. Values: small, medium, large.
+- [dimension/stated_severity](dimension/stated_severity): Stated Severity. Group by sr.stated_severity. Values: low, medium, high, emergency.
+- [dimension/tenant](dimension/tenant): Tenant. Group by t.tenant_code.
+- [dimension/vocab_drift_level](dimension/vocab_drift_level): Vocabulary Drift Level. Group by t.vocab_drift_level. Values: low, medium, high.
+
+## Tenant profiles
+
+> One customer city or county: where it is, its population and size tier, how far its local wording drifts from what the classifier was trained on, when it launched, and its current monthly health snapshot (the numbers the customer was shown). Read it before describing a tenant's situation.
+
+- [tenant/<key>](tenant/<key>): one per key; list_sources shows the keys you may read.

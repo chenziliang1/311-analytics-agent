@@ -137,9 +137,13 @@ def fetch_rows(
     timeout_seconds: int | None = None,
     role: str | None = None,
     restore_role: str | None = None,
+    params: T.Mapping[str, T.Any] | None = None,
 ) -> QueryRows:
     """
     Run a read-only query and return at most ``max_rows`` rows as plain values.
+
+    ``params`` binds ``:name`` placeholders in ``sql``, the only way a value
+    from outside (a document key) reaches a trusted query.
 
     The same rolled-back transaction as :func:`execute_sql_query`, so this is
     read-only for the same reason. ``timeout_seconds`` becomes PostgreSQL's
@@ -169,7 +173,7 @@ def fetch_rows(
                 conn.exec_driver_sql(
                     f"SET LOCAL statement_timeout = '{int(timeout_seconds)}s'"
                 )
-            result = conn.execute(sa.text(sql))
+            result = conn.execute(sa.text(sql), dict(params or {}))
             columns = list(result.keys())
             records = result.fetchmany(max_rows + 1)
         except sa_exc.StatementError as e:
