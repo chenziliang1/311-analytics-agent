@@ -176,15 +176,18 @@ TENANT_VIA_WORK_ORDER = ["WORK_ORDER_NOTES"]
 def step_tenant(conn) -> None:
     """Derive tenant_id on the child tables, so step_secure's policy loop finds them."""
     cur = conn.cursor()
-    sources = [(t, "ANALYTICS.SERVICE_REQUESTS p", "p.request_id = c.request_id") for t in TENANT_VIA_REQUEST]
-    sources += [(t, "ANALYTICS.WORK_ORDERS p", "p.work_order_id = c.work_order_id") for t in TENANT_VIA_WORK_ORDER]
-    for table, parent, on in sources:
+    sources = [(t, "ANALYTICS.SERVICE_REQUESTS", "request_id") for t in TENANT_VIA_REQUEST]
+    sources += [(t, "ANALYTICS.WORK_ORDERS", "work_order_id") for t in TENANT_VIA_WORK_ORDER]
+    for table, parent, key in sources:
         started = time.time()
         run(cur, f"ALTER TABLE ANALYTICS.{table} ADD COLUMN IF NOT EXISTS tenant_id NUMBER(38,0)")
-        run(cur, f"UPDATE ANALYTICS.{table} c SET tenant_id = p.tenant_id FROM {parent} WHERE {on}")
+        run(cur, f"UPDATE ANALYTICS.{table} SET tenant_id = p.tenant_id "
+                 f"FROM {parent} p WHERE p.{key} = {table}.{key}")
         # Metadata only (Snowflake does not enforce it), but the schema the SQL
         # writer reads marks the column as a join to TENANTS.
-        declared = {r[4] for r in run(cur, f"SHOW IMPORTED KEYS IN TABLE ANALYTICS.{table}")}  # fk_column_name
+        cur.execute(f"SHOW IMPORTED KEYS IN TABLE ANALYTICS.{table}")
+        fk_column = [d[0] for d in cur.description].index("fk_column_name")
+        declared = {row[fk_column] for row in cur.fetchall()}
         if "TENANT_ID" not in declared:
             run(cur, f"ALTER TABLE ANALYTICS.{table} ADD FOREIGN KEY (tenant_id) REFERENCES ANALYTICS.TENANTS (tenant_id)")
         missing = run(cur, f"SELECT COUNT(*) FROM ANALYTICS.{table} WHERE tenant_id IS NULL")[0][0]
