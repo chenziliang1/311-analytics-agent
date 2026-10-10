@@ -567,6 +567,41 @@ class TestKnowledgeTools:
         assert read_source(deps, "metric/defect_rate", user_id="cy").status == "ok"
 
 
+class TestFastPath:
+    """A plain metric question compiled from the layer; anything else, the writer."""
+
+    def test_off_by_default_the_writer_is_asked(self, engine, registry):
+        writer = ScriptedWriter(sql("SELECT line_code, AVG(is_defective) AS defect_rate FROM widget GROUP BY line_code"))
+        out = answer(make_deps(engine, registry, writer, []), "defect rate by line in the first quarter")
+        assert out.path == "writer" and len(writer.requests) == 1
+
+    def test_on_a_plain_question_never_reaches_the_writer(self, engine, registry):
+        writer = ScriptedWriter()
+        log = []
+        deps = dataclasses.replace(make_deps(engine, registry, writer, log), fast_path=True)
+        out = answer(deps, "defect rate by line in the first quarter")
+        assert out.status == "ok" and out.path == "compiled"
+        assert writer.requests == []
+        flat = " ".join(out.sql.split())
+        assert "GROUP BY w.line_code" in flat and out.columns[-1] == "defect_rate"
+        assert sorted(row[0] for row in out.rows) == ["A", "B"]
+        assert [s.id for s in out.sources] == ["metric/defect_rate", "window/q1"]
+        assert log[0]["path"] == "compiled"
+
+    def test_on_a_question_with_a_condition_goes_to_the_writer(self, engine, registry):
+        writer = ScriptedWriter(sql("SELECT line_code, AVG(is_defective) AS defect_rate FROM widget WHERE owner_id = 1 GROUP BY line_code"))
+        deps = dataclasses.replace(make_deps(engine, registry, writer, []), fast_path=True)
+        out = answer(deps, "defect rate by line for Ada's widgets")
+        assert out.path == "writer" and len(writer.requests) == 1
+
+    def test_a_compiled_query_that_fails_falls_back_to_the_writer(self, engine, registry):
+        """The table the layer names is not in the warehouse: the writer gets the question."""
+        writer = ScriptedWriter(sql("SELECT COUNT(*) AS n FROM owner"), sql("SELECT COUNT(*) AS n FROM owner"))
+        deps = dataclasses.replace(make_deps(engine, registry, writer, []), fast_path=True, allowed_tables={"owner"})
+        out = answer(deps, "the overall defect rate")
+        assert out.status == "ok" and out.path == "writer" and len(writer.requests) >= 1
+
+
 class TestTenantScope:
     """The warehouse role each user's query runs as, with the switch itself scripted."""
 

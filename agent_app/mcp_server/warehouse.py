@@ -18,6 +18,7 @@ import sqlalchemy as sa
 
 from ..knowledge import cited_sources
 from ..semantic_layer.api import Match, SemanticRegistry
+from ..semantic_layer.fast_path import plan_fast_path
 from ..sql_guard import guard_select
 from ..sql_utils import fetch_rows, role_statements
 from ..tenant_access import TenantAccess
@@ -47,6 +48,10 @@ class WarehouseDeps:
     tenant_access: TenantAccess = dataclasses.field(
         default_factory=lambda: TenantAccess(internal_role=None)
     )
+    #: Compile a plain metric question from the semantic layer instead of
+    #: asking the writer (semantic_layer.fast_path). Off until the eval says
+    #: the gate is right.
+    fast_path: bool = False
 
 
 def _resolve(
@@ -127,6 +132,46 @@ def role_table_source(engine: sa.Engine, table: str) -> T.Callable[[], list[tupl
     return read
 
 
+def _run_compiled(
+    deps: WarehouseDeps, intent: str, match: Match, run_as: dict, version: str, sources: list
+) -> WarehouseQueryOutput | None:
+    """The fast path's result, or None when the writer should take the question."""
+    plan = plan_fast_path(deps.registry, intent, match)
+    if plan is None:
+        return None
+    guarded = guard_select(
+        plan.sql,
+        deps.allowed_tables,
+        deps.registry.sensitive_columns,
+        max_rows=deps.max_rows,
+        dialect=deps.dialect,
+        target_dialect=deps.target_dialect,
+        redacted_columns=deps.registry.redacted_columns,
+    )
+    if guarded.blocked:
+        return None
+    result = fetch_rows(deps.engine, guarded.sql, deps.max_rows, deps.timeout_seconds, **run_as)
+    if result.error or result.timed_out:
+        return None
+    notes = list(plan.warnings) + list(guarded.warnings)
+    if result.truncated:
+        notes.append(f"Only the first {deps.max_rows} rows were returned; add a filter or aggregate further.")
+    if not result.rows:
+        notes.append("No rows matched.")
+    return WarehouseQueryOutput(
+        status="ok" if result.rows else "empty",
+        sql=guarded.sql,
+        columns=result.columns,
+        rows=result.rows,
+        row_count=len(result.rows),
+        truncated=result.truncated,
+        warning=" ".join(notes) or None,
+        semantic_layer_version=version,
+        sources=sources,
+        path="compiled",
+    )
+
+
 def run_as_for(deps: WarehouseDeps, user_id: str | None) -> tuple[dict, str | None]:
     """
     How ``user_id``'s reads run: ``fetch_rows`` keyword arguments, or why they
@@ -202,6 +247,7 @@ def answer(
                 "metrics": [m.name for m in match.metrics],
                 "unresolved_names": unresolved,
                 "status": output.status,
+                "path": output.path,
                 "sql": output.sql,
                 "row_count": output.row_count,
                 "seconds": round(time.monotonic() - started, 2),
@@ -218,6 +264,13 @@ def answer(
             warning=f"Refused: {refused}.",
             semantic_layer_version=version,
         ))
+
+    if deps.fast_path:
+        compiled = _run_compiled(deps, intent, match, run_as, version, sources)
+        if compiled is not None:
+            return finish(compiled)
+        # Anything the compiler could not do, or a compiled query that
+        # failed, goes to the writer as if the fast path did not exist.
 
     previous_sql = previous_error = None
     # Each kind of second chance is given once (a rewrite for a skipped

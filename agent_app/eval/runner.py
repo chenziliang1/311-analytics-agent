@@ -77,6 +77,9 @@ class CaseScore:
     judge_reason: str = ""
     missing_rows: int = 0
     error: str | None = None
+    #: Some query this turn was compiled from the semantic layer (the fast
+    #: path) rather than written by the writer model.
+    compiled: bool = False
 
 
 def run_case(
@@ -160,6 +163,7 @@ def run_case(
             unsupported=unsupported,
             judge_reason=verdict.reason,
             missing_rows=best_missing,
+            compiled=any(o.get("path") == "compiled" for o in turn.query_outputs),
         )
     except Exception as e:
         return CaseScore(

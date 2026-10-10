@@ -260,6 +260,10 @@ class Config:
     #: The role for a signed-in user the map does not name. None refuses
     #: their queries once a map is set: an unknown user is not an internal one.
     tenant_default_role: str | None = dataclasses.field(default=None)
+    #: Compile a plain metric question from the semantic layer instead of
+    #: asking the SQL writer (semantic_layer.fast_path). Off by default; the
+    #: eval with it on and off decides.
+    fast_path: bool = dataclasses.field(default=False)
     #: A warehouse table of (login, role_name) rows read as the map, refreshed
     #: every few minutes, with tenant_role_map laid over it: a customer is
     #: added by one row, not a redeploy. The loader creates
@@ -465,6 +469,7 @@ class Config:
             tenant_role_map=parse_role_map(get_env("TENANT_ROLE_MAP")),
             tenant_default_role=get_env("TENANT_DEFAULT_ROLE") or None,
             tenant_role_table=get_env("TENANT_ROLE_TABLE") or None,
+            fast_path=get_env_bool("FAST_PATH"),
             db_host=get_env("DB_HOST"),
             db_port=get_env_int("DB_PORT"),
             db_user=get_env("DB_USER"),

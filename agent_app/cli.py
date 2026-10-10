@@ -214,6 +214,7 @@ class Cli:
             "judge_self_graded": self_graded,
             "cases": (f"{golden_path.stem}:" if golden else "") + (",".join(wanted) if wanted else "all"),
             "golden": str(golden_path),
+            "fast_path": config.fast_path,
         }
         path_enum.dir_eval_reports.mkdir(parents=True, exist_ok=True)
         stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -224,7 +225,8 @@ class Cli:
         # The committed record: every number quoted anywhere points back here.
         from agent_app.eval.report import append_results
 
-        append_results(path_enum.path_eval_results_md, summary, note="self-graded judge" if self_graded else "")
+        notes = (["self-graded judge"] if self_graded else []) + (["fast path on"] if config.fast_path else [])
+        append_results(path_enum.path_eval_results_md, summary, note=", ".join(notes))
         print(f"Recorded in: {path_enum.path_eval_results_md}")
         failed = [k for k, v in summary["passed"].items() if v is False]
         raise SystemExit(1 if failed else 0)

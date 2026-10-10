@@ -116,6 +116,13 @@ class TestConfig:
         with pytest.raises(ValueError, match="TENANT_DEFAULT_ROLE"):
             Config(tenant_default_role="SHOP_RO; DROP")
 
+    def test_fast_path_is_off_unless_asked_for(self, monkeypatch):
+        assert Config().fast_path is False
+        monkeypatch.setenv("FAST_PATH", "true")
+        assert Config.new_from_env_var().fast_path is True
+        monkeypatch.setenv("FAST_PATH", "nonsense")
+        assert Config.new_from_env_var().fast_path is False
+
     def test_tenant_role_table_must_be_a_table_name(self, monkeypatch):
         assert Config(tenant_role_table="CITYPULSE_AUDIT.USER_ROLE_ACCESS").tenant_role_table
         with pytest.raises(ValueError, match="TENANT_ROLE_TABLE"):
