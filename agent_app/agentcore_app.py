@@ -118,6 +118,10 @@ def build_app(agent_factory=None, metrics=None, feedback_recorder=None) -> FastA
             m.put("TurnLatency", seconds, unit="Seconds")
             m.put("InputTokens", result.input_tokens)
             m.put("OutputTokens", result.output_tokens)
+            # Turns with a number no query returned: most are derived ratios,
+            # so the level means little; a jump after a model or prompt change
+            # is the signal.
+            m.put("UnverifiedNumberTurns", 1 if result.unverified_numbers else 0)
 
         started = time.monotonic()
         if "text/event-stream" not in request.headers.get("accept", ""):

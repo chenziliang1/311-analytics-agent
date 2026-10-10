@@ -19,6 +19,11 @@ export type StatusEvent = {
 export type TurnData = {
   status: "ok" | "clarify" | "error"
   warnings: string[]
+  /**
+   * Numbers in the answer that no query this turn returned
+   * (agent_app/number_check.py). Absent on answers saved before it existed.
+   */
+  unverified?: string[]
 }
 
 /** A result too long for the bubble, whole, for the CSV download. */

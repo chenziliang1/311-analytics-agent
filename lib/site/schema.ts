@@ -99,6 +99,8 @@ export interface SiteConfig {
       retry: string
       /** Starts the line repeating a query's warnings under an answer. */
       notePrefix: string
+      /** Starts the line listing numbers in an answer that no query returned. */
+      unverifiedPrefix: string
       /** The CSV button's label; `{rows}` becomes the row count. */
       downloadCsv: string
       newChat: string
@@ -169,6 +171,7 @@ export const REQUIRED_SITE_KEYS: readonly string[] = [
   "chat.messages.errorBanner",
   "chat.messages.retry",
   "chat.messages.notePrefix",
+  "chat.messages.unverifiedPrefix",
   "chat.messages.downloadCsv",
   "chat.messages.newChat",
   "chat.messages.signedInAs",

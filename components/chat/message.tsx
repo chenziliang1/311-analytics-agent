@@ -2,7 +2,7 @@
 
 import { motion } from "framer-motion";
 import { User } from "lucide-react";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 
 import { AssistantAvatar } from "./AssistantAvatar";
 import { Markdown } from "./markdown";
@@ -129,12 +129,18 @@ export const PreviewMessage = ({
                   );
                 }
                 if (part.type === "data-turn") {
+                  const unverified = part.data.unverified ?? [];
                   return (
-                    <NoteLine
-                      key={index}
-                      prefix={site.chat.messages.notePrefix}
-                      warnings={part.data.warnings}
-                    />
+                    <Fragment key={index}>
+                      <NoteLine
+                        prefix={site.chat.messages.notePrefix}
+                        warnings={part.data.warnings}
+                      />
+                      <NoteLine
+                        prefix={site.chat.messages.unverifiedPrefix}
+                        warnings={unverified.length ? [unverified.join(", ")] : []}
+                      />
+                    </Fragment>
                   );
                 }
                 if (part.type === "data-table") {
