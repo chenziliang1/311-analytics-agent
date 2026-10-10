@@ -9,9 +9,9 @@ rather than a test double of it; tests pass a scripted one.
 """
 
 import dataclasses
-import re
 import typing as T
 
+from ..knowledge import citations
 from .grounding import unsupported_numbers
 from .judge import Judge, Verdict, build_judge_request, parse_verdict
 from .matching import golden_rows, match_result, unpivoted
@@ -35,7 +35,28 @@ Chat = T.Callable[[list[tuple[str, str]]], Turn]
 #: Takes a query, returns (columns, rows) from the database.
 Reference = T.Callable[[str], tuple[list[str], list[list]]]
 
-_EXPLAINED = re.compile(r"how this was computed", re.I)
+#: Takes a source id, says whether the knowledge base could hold it.
+Knows = T.Callable[[str], bool]
+
+
+def cited_correctly(answer: str, case_metrics: T.Sequence[str], knows: Knows | None) -> bool | None:
+    """
+    The answer cites the definition its number rests on.
+
+    None when the case involves no metric. False when it cites nothing, cites
+    a source the knowledge base does not have (an invented one), or cites
+    only sources other than the case's metrics. Presence of a "how this was
+    computed" sentence is not enough: a citation names one document, and a
+    wrong one is checkable.
+    """
+    if not case_metrics:
+        return None
+    cited = citations(answer)
+    if not cited:
+        return False
+    if knows is not None and any(not knows(c) for c in cited):
+        return False
+    return any(f"metric/{m}" in cited for m in case_metrics)
 
 
 @dataclasses.dataclass
@@ -47,8 +68,9 @@ class CaseScore:
     #: Judge verdicts; None when the judge was off or unreadable.
     answer_ok: bool | None
     hallucinated: bool | None
-    #: The answer says how its metric was computed. None when no metric applies.
-    explained: bool | None
+    #: The answer cites the metric it rests on (cited_correctly). None when no
+    #: metric applies.
+    cited: bool | None
     seconds: float
     statuses: list[str]
     unsupported: list[str]
@@ -63,6 +85,7 @@ def run_case(
     chat: Chat,
     reference: Reference,
     judge: Judge | None,
+    knows: Knows | None = None,
 ) -> CaseScore:
     """One conversation: earlier turns first, then the graded one. Never raises."""
     try:
@@ -131,7 +154,7 @@ def run_case(
             sql_ok=sql_ok,
             answer_ok=verdict.correct,
             hallucinated=verdict.hallucinated,
-            explained=bool(_EXPLAINED.search(turn.answer)) if case.metrics else None,
+            cited=cited_correctly(turn.answer, case.metrics, knows),
             seconds=turn.seconds,
             statuses=[str(o.get("status")) for o in turn.query_outputs],
             unsupported=unsupported,
@@ -145,7 +168,7 @@ def run_case(
             sql_ok=False,
             answer_ok=None,
             hallucinated=None,
-            explained=None,
+            cited=None,
             seconds=0.0,
             statuses=[],
             unsupported=[],
@@ -159,11 +182,12 @@ def run_all(
     reference: Reference,
     judge: Judge | None,
     on_score: T.Callable[[CaseScore], None] = lambda s: None,
+    knows: Knows | None = None,
 ) -> list[CaseScore]:
     scores = []
     for case in cases:
         for question in case.questions:
-            score = run_case(case, question, chat, reference, judge)
+            score = run_case(case, question, chat, reference, judge, knows)
             on_score(score)
             scores.append(score)
     return scores

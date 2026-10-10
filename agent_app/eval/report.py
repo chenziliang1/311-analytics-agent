@@ -3,9 +3,10 @@
 """
 Five numbers from a list of case scores, against their release thresholds.
 
-"Citation" here is the explained rate: answers involving a metric that say how
-it was computed: the line the agent writes from the query it ran. Citing a
-knowledge base would be the stronger form, once there is one.
+"Citation" is the share of metric answers that cite the knowledge base
+document of the metric their number rests on, as ``[KB:metric/<name>]``: not
+merely a sentence about how it was computed, but a pointer to the one
+definition the SQL writer built the query from, which is checkable.
 """
 
 import dataclasses
@@ -46,7 +47,7 @@ def summarize(scores: list[CaseScore]) -> dict:
         "sql_accuracy": _rate([s.sql_ok for s in scores]),
         "answer_accuracy": _rate([s.answer_ok for s in scores]),
         "hallucination_rate": _rate([s.hallucinated for s in scores]),
-        "citation_rate": _rate([s.explained for s in scores]),
+        "citation_rate": _rate([s.cited for s in scores]),
         "p50_latency_seconds": _percentile(latencies, 0.5),
         "p95_latency_seconds": _percentile(latencies, 0.95),
     }
