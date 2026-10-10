@@ -407,7 +407,23 @@ def check_golden_cases(report: Report) -> bool:
     ok = bool(cases)
     if cases == []:
         report.error("golden-cases", f"no cases in {path}")
-    report.section(f"golden cases ({len(cases or [])})", ok)
+    # Held-out files load by the same rules; an id shared with the golden set
+    # would be graded as the same case twice.
+    known = {c.id for c in cases or []}
+    held_out = 0
+    for extra in sorted(path.parent.glob("holdout/*.yml")):
+        try:
+            more = load_golden_cases(extra)
+        except Exception as e:
+            report.error("golden-cases", f"{extra}: {e}")
+            ok = False
+            continue
+        for dup in sorted(known & {c.id for c in more}):
+            report.error("golden-cases", f"{extra}: case {dup!r} is also in the golden set")
+            ok = False
+        held_out += len(more)
+    label = f"golden cases ({len(cases or [])}" + (f", {held_out} held out)" if held_out else ")")
+    report.section(label, ok)
     return ok
 
 

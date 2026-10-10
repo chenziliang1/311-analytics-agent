@@ -447,3 +447,25 @@ if __name__ == "__main__":
         "agent_app.content_check",
         preview=False,
     )
+
+
+class TestHeldOutCases:
+    HOLDOUT = (
+        "- id: H01\n  source: a colleague\n  questions: ['How many widgets?']\n"
+        "  reference_sql: SELECT COUNT(*) AS n FROM widget\n  match: {values: [n]}\n"
+    )
+
+    def test_a_held_out_file_loads_and_is_counted(self, monkeypatch, tmp_path):
+        use_tmp_repo(monkeypatch, tmp_path)
+        (tmp_path / "data" / "eval" / "holdout").mkdir()
+        (tmp_path / "data" / "eval" / "holdout" / "colleague.yml").write_text(self.HOLDOUT, encoding="utf-8")
+        report = cc.Report()
+        assert cc.check_golden_cases(report) and report.errors == []
+
+    def test_an_id_shared_with_the_golden_set_fails(self, monkeypatch, tmp_path):
+        use_tmp_repo(monkeypatch, tmp_path)
+        (tmp_path / "data" / "eval" / "holdout").mkdir()
+        (tmp_path / "data" / "eval" / "holdout" / "colleague.yml").write_text(self.HOLDOUT.replace("H01", "W01"), encoding="utf-8")
+        report = cc.Report()
+        assert not cc.check_golden_cases(report)
+        assert "W01" in report.errors[0] and "also in the golden set" in report.errors[0]
