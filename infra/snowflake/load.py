@@ -352,10 +352,16 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--step", choices=["all", "raw", "model", "tenant", "secure", "users", "switches", "verify"], default="all")
     step = parser.parse_args().step
-    seed_path = find_seed()
-    seed = sqlite3.connect(seed_path)
+    # Only the data steps read the seed; the others (policies, users,
+    # switches) run from a checkout without the 1 GB file.
+    seed = None
+    if step in ("all", "raw", "model", "verify"):
+        seed_path = find_seed()
+        seed = sqlite3.connect(seed_path)
+        log(f"seed {seed_path.name} -> {ACCOUNT}/{DATABASE}")
+    else:
+        log(f"-> {ACCOUNT}/{DATABASE}")
     conn = connect()
-    log(f"seed {seed_path.name} -> {ACCOUNT}/{DATABASE}")
     if step in ("all", "raw"):
         step_raw(conn, seed)
     if step in ("all", "model"):
