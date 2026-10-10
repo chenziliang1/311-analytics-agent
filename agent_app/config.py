@@ -260,6 +260,11 @@ class Config:
     #: The role for a signed-in user the map does not name. None refuses
     #: their queries once a map is set: an unknown user is not an internal one.
     tenant_default_role: str | None = dataclasses.field(default=None)
+    #: A warehouse table of (login, role_name) rows read as the map, refreshed
+    #: every few minutes, with tenant_role_map laid over it: a customer is
+    #: added by one row, not a redeploy. The loader creates
+    #: CITYPULSE_AUDIT.USER_ROLE_ACCESS for it.
+    tenant_role_table: str | None = dataclasses.field(default=None)
     # --- Database ---
     db_host: str | None = dataclasses.field(default=None)
     db_port: int | None = dataclasses.field(default=None)
@@ -304,6 +309,10 @@ class Config:
         }
         if self.tenant_default_role is not None:
             check_role_name(self.tenant_default_role, "TENANT_DEFAULT_ROLE")
+        if self.tenant_role_table is not None:
+            from .tenant_access import check_table_name
+
+            check_table_name(self.tenant_role_table, "TENANT_ROLE_TABLE")
         self.warehouse = (self.warehouse or "postgres").strip().lower()
         if self.warehouse not in ("postgres", "snowflake"):
             raise ValueError(
@@ -455,6 +464,7 @@ class Config:
             snowflake_private_key_path=get_env("SNOWFLAKE_PRIVATE_KEY_PATH"),
             tenant_role_map=parse_role_map(get_env("TENANT_ROLE_MAP")),
             tenant_default_role=get_env("TENANT_DEFAULT_ROLE") or None,
+            tenant_role_table=get_env("TENANT_ROLE_TABLE") or None,
             db_host=get_env("DB_HOST"),
             db_port=get_env_int("DB_PORT"),
             db_user=get_env("DB_USER"),

@@ -96,6 +96,23 @@ def _build_default_deps() -> WarehouseDeps:  # pragma: no cover - needs a databa
         metrics.put("InputTokens", input_tokens)
         metrics.put("OutputTokens", output_tokens)
 
+    tenant_access = one.config.tenant_access
+    if one.config.tenant_role_table:
+        import dataclasses
+        import sys
+
+        from ..tenant_access import RoleDirectory
+        from .warehouse import role_table_source
+
+        tenant_access = dataclasses.replace(
+            tenant_access,
+            user_roles=RoleDirectory(
+                role_table_source(one.engine, one.config.tenant_role_table),
+                overrides=one.config.tenant_role_map,
+                on_error=lambda e: print(f"[TenantAccess] role table read failed: {e}", file=sys.stderr),
+            ),
+        )
+
     return WarehouseDeps(
         engine=one.engine,
         registry=load_registry(path_enum.dir_semantic_layer),
@@ -104,7 +121,7 @@ def _build_default_deps() -> WarehouseDeps:  # pragma: no cover - needs a databa
         allowed_tables=allowed,
         dialect="postgres",
         target_dialect=one.sql_dialect,
-        tenant_access=one.config.tenant_access,
+        tenant_access=tenant_access,
         writer=model_writer(
             one.sql_writer_model,
             writer_system_prompt(

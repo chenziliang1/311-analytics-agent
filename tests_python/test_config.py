@@ -116,6 +116,13 @@ class TestConfig:
         with pytest.raises(ValueError, match="TENANT_DEFAULT_ROLE"):
             Config(tenant_default_role="SHOP_RO; DROP")
 
+    def test_tenant_role_table_must_be_a_table_name(self, monkeypatch):
+        assert Config(tenant_role_table="CITYPULSE_AUDIT.USER_ROLE_ACCESS").tenant_role_table
+        with pytest.raises(ValueError, match="TENANT_ROLE_TABLE"):
+            Config(tenant_role_table="audit.users; DROP TABLE x")
+        monkeypatch.setenv("TENANT_ROLE_TABLE", "")
+        assert Config.new_from_env_var().tenant_role_table is None
+
     def test_tenant_map_is_read_from_the_environment(self, monkeypatch):
         monkeypatch.setenv("TENANT_ROLE_MAP", "ada=SHOP_PLANT_NORTH, bo=SHOP_RO")
         monkeypatch.setenv("TENANT_DEFAULT_ROLE", "")

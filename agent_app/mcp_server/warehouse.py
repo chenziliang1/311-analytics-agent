@@ -103,6 +103,30 @@ def _unread_term_tables(match: Match, tables: set[str]) -> list[tuple[str, str]]
     ]
 
 
+def role_table_source(engine: sa.Engine, table: str) -> T.Callable[[], list[tuple[str, str]]]:
+    """
+    Reads ``(login, role_name)`` rows from ``table`` for a RoleDirectory.
+
+    Read as the service connection's own role, which the loader grants SELECT
+    on the table: the map is consulted before any role switch, so it cannot
+    depend on one.
+    """
+    from .. import sql_utils
+    from ..tenant_access import check_table_name
+
+    sql = f"SELECT login, role_name FROM {check_table_name(table)}"
+
+    def read() -> list[tuple[str, str]]:
+        # Not this module's fetch_rows: that one runs the user's query, and a
+        # test that scripts it must not also script the map.
+        result = sql_utils.fetch_rows(engine, sql, 10_000)
+        if result.error:
+            raise RuntimeError(f"role table {table}: {result.error}")
+        return [(str(row[0]), str(row[1])) for row in result.rows]
+
+    return read
+
+
 def run_as_for(deps: WarehouseDeps, user_id: str | None) -> tuple[dict, str | None]:
     """
     How ``user_id``'s reads run: ``fetch_rows`` keyword arguments, or why they

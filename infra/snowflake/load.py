@@ -17,6 +17,8 @@ and check it.
     secure  CITYPULSE_RO gets SELECT on ANALYTICS and INSERT on the query log,
             nothing else; the row access policy goes on every table with a
             tenant_id.
+    users   The login -> role table the agent reads for per-user tenant
+            scope (CITYPULSE_AUDIT.USER_ROLE_ACCESS), created empty.
     verify  Row counts against the seed, key and foreign-key orphans, RO
             refused a write, the demo role sees one tenant, in the child
             tables as well.
@@ -260,6 +262,21 @@ def step_secure(conn) -> None:
     log(f"row access policy on {len(tables)} tables with tenant_id")
 
 
+#: Who runs as which role, one row per signed-in login. The agent reads it
+#: (TENANT_ROLE_TABLE) and refreshes every few minutes: adding a customer's
+#: user is an INSERT here, not a redeploy. Empty by default: the demo's
+#: users are internal.
+USER_ROLE_TABLE = f"{DATABASE}.CITYPULSE_AUDIT.USER_ROLE_ACCESS"
+
+
+def step_users(conn) -> None:
+    cur = conn.cursor()
+    run(cur, f"CREATE TABLE IF NOT EXISTS {USER_ROLE_TABLE} (login VARCHAR NOT NULL, role_name VARCHAR NOT NULL)")
+    run(cur, f"GRANT SELECT ON TABLE {USER_ROLE_TABLE} TO ROLE CITYPULSE_RO")
+    rows = run(cur, f"SELECT COUNT(*) FROM {USER_ROLE_TABLE}")[0][0]
+    log(f"{USER_ROLE_TABLE}: {rows} login(s) mapped; CITYPULSE_RO may read it")
+
+
 def step_verify(conn, seed: sqlite3.Connection) -> bool:
     cur = conn.cursor()
     ok = True
@@ -309,7 +326,7 @@ def step_verify(conn, seed: sqlite3.Connection) -> bool:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--step", choices=["all", "raw", "model", "tenant", "secure", "verify"], default="all")
+    parser.add_argument("--step", choices=["all", "raw", "model", "tenant", "secure", "users", "verify"], default="all")
     step = parser.parse_args().step
     seed_path = find_seed()
     seed = sqlite3.connect(seed_path)
@@ -323,6 +340,8 @@ def main() -> None:
         step_tenant(conn)
     if step in ("all", "secure"):
         step_secure(conn)
+    if step in ("all", "users"):
+        step_users(conn)
     ok = True
     if step in ("all", "verify"):
         ok = step_verify(conn, seed)
