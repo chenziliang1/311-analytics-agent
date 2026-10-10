@@ -501,11 +501,13 @@ def test_audit_records_who_asked(engine, registry):
 class TestKnowledgeTools:
     """The index and a document, for one asker, over the widget shop."""
 
-    def test_a_query_returns_the_ids_to_cite(self, engine, registry):
+    def test_a_query_returns_the_definitions_it_used_to_cite(self, engine, registry):
         writer = ScriptedWriter(sql("SELECT line_code, AVG(is_defective) AS defect_rate FROM widget GROUP BY line_code"))
         out = answer(make_deps(engine, registry, writer, []), "defect rate per line in the first quarter")
         assert out.status == "ok"
-        assert out.sources == ["metric/defect_rate", "window/q1"]
+        assert [s.id for s in out.sources] == ["metric/defect_rate", "window/q1"]
+        assert out.sources[0].citation == "[KB:metric/defect_rate]"
+        assert "1.0 * SUM(w.is_defective)" in out.sources[0].text
 
     def test_index_lists_definitions_and_the_plants_in_the_warehouse(self, engine, registry):
         from agent_app.mcp_server.knowledge import source_index

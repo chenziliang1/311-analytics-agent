@@ -16,12 +16,12 @@ import typing as T
 
 import sqlalchemy as sa
 
-from ..knowledge import source_ids_for
+from ..knowledge import cited_sources
 from ..semantic_layer.api import Match, SemanticRegistry
 from ..sql_guard import guard_select
 from ..sql_utils import fetch_rows, role_statements
 from ..tenant_access import TenantAccess
-from .models import WarehouseQueryOutput
+from .models import CitedSource, WarehouseQueryOutput
 from .sql_writer import Writer, build_request, parse_reply
 
 
@@ -153,8 +153,12 @@ def answer(
     match, unresolved = _resolve(
         deps.registry, intent, requested_metrics, requested_dimensions, time_window
     )
-    # What an answer built on this query should cite.
-    sources = source_ids_for(match)
+    # The definitions behind the question, whole: what the answer is written
+    # and cited from.
+    sources = [
+        CitedSource(id=s.id, title=s.title, text=s.text, citation=s.citation)
+        for s in cited_sources(deps.registry, match)
+    ]
     warnings = []
     if any(d.sensitive for d in match.dimensions):
         warnings.append("Residents' personal data cannot be shown; it was left out.")

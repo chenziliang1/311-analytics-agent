@@ -83,8 +83,18 @@ def test_a_metric_document_is_its_definition(registry):
     doc = KnowledgeBase(registry).static_sources["metric/defect_rate"]
     assert doc.title == "Defect Rate" and doc.citation == "[KB:metric/defect_rate]"
     for needle in ("1.0 * SUM(w.is_defective)", "widget w", "JOIN plant p", "w.shipped_at IS NOT NULL",
-                   "w.built_on", "defects", "Count shipped widgets only.", "0.25 over q1"):
+                   "w.built_on", "defects", "Count shipped widgets only."):
         assert needle in doc.text, needle
+    # The replay value is a test fixture; shown, the agent quoted one as a result.
+    assert "0.25" not in doc.text
+
+
+def test_cited_sources_are_whole_documents(registry):
+    from agent_app.knowledge import cited_sources
+
+    docs = cited_sources(registry, registry.match("defects per line in the first quarter"))
+    assert [d.id for d in docs] == ["metric/defect_rate", "window/q1"]
+    assert docs[0].citation == "[KB:metric/defect_rate]" and "Formula" in docs[0].text
 
 
 def test_term_window_and_dimension_documents(registry):

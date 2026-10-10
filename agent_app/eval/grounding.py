@@ -18,6 +18,8 @@ from .matching import as_number
 # is 987, which a question or an earlier answer may contain as "987".
 _NUMBER = re.compile(r"(?<![\w.])-?\d(?:[\d,]*\d)?(?:\.\d+)?%?")
 _DATE = re.compile(r"\b\d{4}-\d{2}(?:-\d{2})?\b")
+#: A year on its own: the data's own years, never a result.
+_YEAR = re.compile(r"(?:19|20)\d{2}")
 _FENCED_SQL = re.compile(r"```sql.*?```", re.S | re.I)
 
 
@@ -41,9 +43,9 @@ def unsupported_numbers(answer: str, tool_values: T.Iterable[T.Any], question: s
     Numbers shown in ``answer`` that match no tool value up to the rounding
     they are shown with.
 
-    Skipped as never data: anything inside a ```sql block, dates, small whole
-    numbers (list sizes, day counts, ranks), and numbers the question itself
-    contains.
+    Skipped as never data: anything inside a ```sql block, dates and bare
+    years ("May 2026"), small whole numbers (list sizes, day counts, ranks),
+    and numbers the question itself contains.
     """
     known = [n for n in (as_number(v) for v in tool_values) if n is not None]
     text = _DATE.sub(" ", _FENCED_SQL.sub(" ", answer))
@@ -58,6 +60,8 @@ def unsupported_numbers(answer: str, tool_values: T.Iterable[T.Any], question: s
             continue
         decimals = _decimals(token)
         if decimals == 0 and not is_percent and abs(value) <= 31:
+            continue
+        if _YEAR.fullmatch(token):
             continue
         if not _supported(value, decimals, is_percent, known):
             out.append(token)

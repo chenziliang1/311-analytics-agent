@@ -48,6 +48,11 @@ def test_a_derived_ratio_is_flagged_not_blocked():
     assert unverified_numbers("North made 1,200, four times south's 300; a 75% share.", results) == ["75%"]
 
 
+def test_a_bare_year_is_a_date_not_a_result():
+    """"May 2026" and "2025-06-01" are the data's own calendar, never a figure to verify."""
+    assert unverified_numbers("Volume peaked in May 2026, up from 2025-06-01; 1,204 that month.", [query([["m", 1204]])]) == []
+
+
 def test_empty_answer():
     assert unverified_numbers("", [query([["n", 1]])]) == []
 

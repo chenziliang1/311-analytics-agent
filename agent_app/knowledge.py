@@ -59,6 +59,17 @@ def citations(answer: str) -> list[str]:
     return list(dict.fromkeys(CITATION.findall(answer or "")))
 
 
+def cited_sources(registry: SemanticRegistry, match: Match) -> list["Source"]:
+    """
+    The documents behind a matched question, whole: what a query result
+    carries so the answer can be written and cited from them without a
+    second tool call. The first live eval paid that call on every question
+    (p95 13s to 18s) and still skipped it a fifth of the time.
+    """
+    statics = KnowledgeBase(registry).static_sources
+    return [statics[i] for i in source_ids_for(match) if i in statics]
+
+
 @dataclasses.dataclass(frozen=True)
 class Source:
     id: str
@@ -88,9 +99,8 @@ def _metric_source(m: Metric) -> Source:
     time_axis = m.time_column
     if m.closed_time_column:
         time_axis = f"{m.time_column} (windows anchored on closure: {m.closed_time_column})"
-    replay = None
-    if m.replay:
-        replay = f"{m.replay.expected} over {m.replay.time_window} (tolerance {m.replay.tolerance})"
+    # No replay value: it is a test fixture, and on the first live eval the
+    # agent quoted one as a result ("a 0.2139 reference breach rate").
     body = _bullets([
         ("Formula", m.formula),
         ("Counted from", m.base_table),
@@ -100,7 +110,6 @@ def _metric_source(m: Metric) -> Source:
         ("Latest window end", m.window_end_cap),
         ("Also called", m.synonyms),
         ("Notes", m.notes),
-        ("Reference value", replay),
     ])
     return Source(
         id=f"metric/{m.name}",

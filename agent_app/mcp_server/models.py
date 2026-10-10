@@ -14,6 +14,17 @@ QueryStatus = T.Literal[
 ]
 
 
+class CitedSource(BaseModel):
+    """A knowledge base document a query was built from, carried with its result."""
+
+    id: str
+    title: str
+    #: The definition, Markdown. Write "How this was computed" from it.
+    text: str
+    #: Put this marker, exactly, at the end of that line.
+    citation: str
+
+
 class WarehouseQueryOutput(BaseModel):
     status: QueryStatus
     #: The query that actually ran, after the guard rewrote it. Show this one.
@@ -29,10 +40,10 @@ class WarehouseQueryOutput(BaseModel):
     clarification: str | None = None
     #: Which version of the metric definitions produced this answer.
     semantic_layer_version: str
-    #: Knowledge-base ids of the definitions this query was built from
-    #: (metric/..., term/..., window/...). Read them with read_source and cite
-    #: them in the answer.
-    sources: list[str] = Field(default_factory=list)
+    #: The definitions this query was built from (metric/..., term/...,
+    #: window/...), whole, with the citation marker for each. No read_source
+    #: call is needed for them.
+    sources: list[CitedSource] = Field(default_factory=list)
 
 
 class SourceIndexOutput(BaseModel):
