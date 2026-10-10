@@ -23,6 +23,10 @@ on:
         description: "FAST_PATH on: compile plain metric questions, skip the SQL writer"
         type: boolean
         default: false
+      golden:
+        description: "Another golden file to grade, e.g. data/eval/holdout/colleague.yml; empty grades the golden set"
+        required: false
+        default: ""
 
 concurrency:
   group: eval-${{ github.ref }}
@@ -48,6 +52,7 @@ jobs:
       JUDGE: ${{ inputs.judge == false && 'false' || 'true' }}
       CASES: ${{ inputs.cases }}
       FAST_PATH: ${{ inputs.fast_path == true && 'true' || 'false' }}
+      GOLDEN: ${{ inputs.golden }}
     steps:
       - name: Check the secrets are set
         id: secrets
@@ -73,6 +78,7 @@ jobs:
           args=()
           [ "$JUDGE" = "false" ] && args+=(--nojudge)
           [ -n "$CASES" ] && args+=(--cases "$CASES")
+          [ -n "$GOLDEN" ] && args+=(--golden "$GOLDEN")
           set -o pipefail
           .venv/bin/agent-app grade "${args[@]}" 2>&1 | tee grade.log
       - name: Record the run

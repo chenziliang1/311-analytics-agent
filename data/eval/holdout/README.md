@@ -20,7 +20,9 @@ somebody else thought of.
    (`check-content` enforces that).
 
 Nothing here is graded by default. `agent-app grade --golden data/eval/holdout/<name>.yml`
-grades one file; its row in `results.md` names the file in the Cases column.
+grades one file locally; in GitHub, Actions -> eval -> Run workflow with the
+`golden` input set to that path (or `gh workflow run eval.yml -f golden=data/eval/holdout/<name>.yml`).
+Its row in `results.md` names the file in the Cases column.
 
 ## What is here
 
