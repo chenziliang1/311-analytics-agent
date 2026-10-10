@@ -31,6 +31,9 @@ def guard(sql, max_rows=5000):
         ("SELECT x FROM (SELECT full_name AS x FROM owner) s", "personal data"),
         ("SELECT o.email FROM owner o", "every selected column"),
         ("SELEC id FRM widget", "could not be parsed"),
+        ("SELECT SYSTEM$WAIT(10)", "system$wait"),
+        ("SELECT GET_DDL('table', 'widget')", "get_ddl"),
+        ("SELECT * FROM TABLE(RESULT_SCAN(LAST_QUERY_ID()))", "not allowed"),
     ],
 )
 def test_blocked(sql, reason):
@@ -65,10 +68,37 @@ def test_root_personal_data_column_is_removed_with_a_warning():
     assert result.tables == {"widget", "owner"}
 
 
-def test_personal_data_outside_the_select_list_is_allowed():
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT COUNT(*) FROM owner WHERE email IS NOT NULL",
+        "SELECT COUNT(*) FROM owner WHERE NOT email IS NULL",
+        "SELECT COUNT(*) FROM owner o WHERE o.email IS NULL",
+    ],
+)
+def test_personal_data_null_checks_are_allowed(sql):
     """Counting residents who have an email reads the column but returns none of it."""
-    result = guard("SELECT COUNT(*) FROM owner WHERE email IS NOT NULL")
-    assert not result.blocked
+    assert not guard(sql).blocked
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        # Is this resident in here, and what did they report?
+        "SELECT w.id FROM widget w JOIN owner o ON o.id = w.owner_id WHERE o.email = 'a@b.com'",
+        # A phone number, one prefix at a time.
+        "SELECT COUNT(*) FROM owner WHERE full_name LIKE 'Ann%'",
+        "SELECT id FROM owner ORDER BY email LIMIT 1",
+        "SELECT owner_id FROM owner GROUP BY owner_id HAVING MAX(email) > 'm'",
+        "SELECT w.id FROM widget w JOIN owner o ON o.email = w.contact",
+        "SELECT id FROM widget WHERE owner_id IN (SELECT id FROM owner WHERE email LIKE '%@corp.com')",
+    ],
+)
+def test_personal_data_cannot_be_compared_sorted_or_joined_on(sql):
+    result = guard(sql)
+    assert result.blocked
+    assert "IS NULL or IS NOT NULL" in result.blocked_reason
+    assert not result.repairable
 
 
 def test_star_over_tables_without_personal_data_is_allowed():
