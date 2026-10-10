@@ -162,7 +162,6 @@ def build_server(deps_factory=default_deps, feedback_factory=default_feedback_si
     @server.tool(name="warehouse_query")
     def warehouse_query(
         intent: str,
-        user_role: str = "internal_analyst",
         requested_metrics: list[str] | None = None,
         requested_dimensions: list[str] | None = None,
         time_window: str | None = None,
@@ -182,7 +181,6 @@ def build_server(deps_factory=default_deps, feedback_factory=default_feedback_si
                 divided by ("what share of all those requests breached",
                 "including open requests"): renaming that to a metric
                 ("breach rate") swaps in the metric's default denominator.
-            user_role: Who is asking, for the audit log.
             requested_metrics: Metric names, when you know them (e.g.
                 sla_breach_rate). Optional; the intent is matched too.
             requested_dimensions: Dimension names to group by (e.g. tenant,
@@ -201,7 +199,6 @@ def build_server(deps_factory=default_deps, feedback_factory=default_feedback_si
         return answer(
             deps_factory(),
             intent=intent,
-            user_role=user_role,
             requested_metrics=requested_metrics or (),
             requested_dimensions=requested_dimensions or (),
             time_window=time_window,

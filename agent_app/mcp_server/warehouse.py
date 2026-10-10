@@ -109,6 +109,10 @@ def answer(
     """
     Never raises: every failure is a status the agent can act on.
 
+    :param user_role: The audience this deployment serves, for the audit log.
+        Deliberately not a tool argument: a role the model fills in is a role
+        the model can make up, and an audit log is only worth what it can't
+        be talked into.
     :param user_id: The signed-in user, for the audit log. Set by the agent's
         TurnObserver, not by the model.
     :param session_id: The chat it was asked in, for the audit log.

@@ -413,6 +413,9 @@ def test_server_lists_and_calls_tools(engine, registry):
 
     tools, called, chart, voted, bad = asyncio.run(run())
     assert {t.name for t in tools.tools} == {"warehouse_query", "visualize", "record_feedback"}
+    query_args = next(t for t in tools.tools if t.name == "warehouse_query").inputSchema["properties"]
+    # The model never says who is asking: identity is filled in by the system.
+    assert "user_role" not in query_args
     assert voted.structuredContent["status"] == "ok"
     assert [(v.rating, v.comment, v.user_id) for v in votes] == [("down", "wrong total", "anonymous")]
     assert bad.structuredContent["status"] == "invalid"
