@@ -149,6 +149,7 @@ CREATE TABLE ANALYTICS.SERVICE_REQUESTS (
 CREATE TABLE ANALYTICS.REQUEST_DESCRIPTIONS (
     description_id NUMBER(38,0) PRIMARY KEY,
     request_id NUMBER(38,0) NOT NULL,       -- FK SERVICE_REQUESTS, UNIQUE 1:1
+    tenant_id NUMBER(38,0),                 -- FK TENANTS; derived from the request by the loader (step tenant), so the row access policy covers this table too
     description_text VARCHAR NOT NULL,      -- resident free text (trap 1/2/4 signal source)
     description_length NUMBER(38,0) NOT NULL,
     submitted_via_text_field NUMBER(38,0) NOT NULL  -- 1 typed, 0 IVR transcribed
@@ -157,6 +158,7 @@ CREATE TABLE ANALYTICS.REQUEST_DESCRIPTIONS (
 CREATE TABLE ANALYTICS.REQUEST_EVENTS (
     event_id NUMBER(38,0) PRIMARY KEY,
     request_id NUMBER(38,0) NOT NULL,       -- FK SERVICE_REQUESTS
+    tenant_id NUMBER(38,0),                 -- FK TENANTS; derived from the request by the loader (step tenant), so the row access policy covers this table too
     event_type VARCHAR NOT NULL,            -- created, classified, assigned, in_progress, on_hold, closed, reopened
     event_at TIMESTAMP_NTZ NOT NULL,
     by_staff_id NUMBER(38,0),               -- FK STAFF_USERS, nullable
@@ -166,6 +168,7 @@ CREATE TABLE ANALYTICS.REQUEST_EVENTS (
 CREATE TABLE ANALYTICS.REQUEST_ASSIGNMENTS (
     assignment_id NUMBER(38,0) PRIMARY KEY,
     request_id NUMBER(38,0) NOT NULL,       -- FK SERVICE_REQUESTS
+    tenant_id NUMBER(38,0),                 -- FK TENANTS; derived from the request by the loader (step tenant), so the row access policy covers this table too
     dept_id NUMBER(38,0) NOT NULL,          -- FK DEPARTMENTS
     staff_id NUMBER(38,0),                  -- FK STAFF_USERS, nullable
     crew_id NUMBER(38,0),                   -- FK FIELD_CREWS, nullable
@@ -177,6 +180,7 @@ CREATE TABLE ANALYTICS.REQUEST_ASSIGNMENTS (
 CREATE TABLE ANALYTICS.REQUEST_ATTACHMENTS (
     attachment_id NUMBER(38,0) PRIMARY KEY,
     request_id NUMBER(38,0) NOT NULL,       -- FK SERVICE_REQUESTS
+    tenant_id NUMBER(38,0),                 -- FK TENANTS; derived from the request by the loader (step tenant), so the row access policy covers this table too
     file_type VARCHAR NOT NULL,             -- image, video, document
     file_name VARCHAR NOT NULL,
     uploaded_at TIMESTAMP_NTZ NOT NULL
@@ -185,6 +189,7 @@ CREATE TABLE ANALYTICS.REQUEST_ATTACHMENTS (
 CREATE TABLE ANALYTICS.WORK_ORDERS (
     work_order_id NUMBER(38,0) PRIMARY KEY,
     request_id NUMBER(38,0) NOT NULL,       -- FK SERVICE_REQUESTS
+    tenant_id NUMBER(38,0),                 -- FK TENANTS; derived from the request by the loader (step tenant), so the row access policy covers this table too
     dept_id NUMBER(38,0) NOT NULL,          -- FK DEPARTMENTS
     crew_id NUMBER(38,0),                   -- FK FIELD_CREWS, nullable
     supervisor_staff_id NUMBER(38,0),       -- FK STAFF_USERS, nullable
@@ -197,6 +202,7 @@ CREATE TABLE ANALYTICS.WORK_ORDERS (
 CREATE TABLE ANALYTICS.WORK_ORDER_NOTES (
     note_id NUMBER(38,0) PRIMARY KEY,
     work_order_id NUMBER(38,0) NOT NULL,    -- FK WORK_ORDERS
+    tenant_id NUMBER(38,0),                 -- FK TENANTS; derived from the request by the loader (step tenant), so the row access policy covers this table too
     by_staff_id NUMBER(38,0) NOT NULL,      -- FK STAFF_USERS
     note_at TIMESTAMP_NTZ NOT NULL,
     note_text VARCHAR NOT NULL,             -- free text (trap 3 secondary evidence)
@@ -206,6 +212,7 @@ CREATE TABLE ANALYTICS.WORK_ORDER_NOTES (
 CREATE TABLE ANALYTICS.MODEL_PREDICTIONS (
     prediction_id NUMBER(38,0) PRIMARY KEY,
     request_id NUMBER(38,0) NOT NULL,       -- FK SERVICE_REQUESTS, UNIQUE 1:1
+    tenant_id NUMBER(38,0),                 -- FK TENANTS; derived from the request by the loader (step tenant), so the row access policy covers this table too
     predicted_category_id NUMBER(38,0) NOT NULL,  -- FK SERVICE_CATEGORIES (raw top1)
     confidence_score FLOAT NOT NULL,        -- 0..1; <0.45 => predicted = Other (fallback)
     predicted_at TIMESTAMP_NTZ NOT NULL,

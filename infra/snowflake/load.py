@@ -11,11 +11,15 @@ and check it.
             Types as the seed had them: timestamps are still text here.
     model   STAGING views cast every column to the ANALYTICS type; the 23
             ANALYTICS tables (ddl.sql) are filled from them.
+    tenant  The per-request tables (descriptions, events, work orders, ...)
+            get a tenant_id copied from their request, so the policy can
+            guard them too.
     secure  CITYPULSE_RO gets SELECT on ANALYTICS and INSERT on the query log,
             nothing else; the row access policy goes on every table with a
             tenant_id.
     verify  Row counts against the seed, key and foreign-key orphans, RO
-            refused a write, the demo role sees one tenant.
+            refused a write, the demo role sees one tenant, in the child
+            tables as well.
 
 Runs as CITYPULSE_LOADER_SVC with the key bootstrap.py generated. Idempotent:
 each step replaces what it builds.
@@ -136,8 +140,16 @@ def step_model(conn, seed: sqlite3.Connection) -> None:
         SELECT table_name, column_name, data_type FROM {DATABASE}.INFORMATION_SCHEMA.COLUMNS
         WHERE table_schema = 'ANALYTICS' ORDER BY table_name, ordinal_position"""):
         columns.setdefault(table, []).append((column, dtype))
+    # Only the columns the seed has: a derived column (a child table's
+    # tenant_id) is in the DDL but not in RAW, and step_tenant fills it.
+    raw_columns: dict[str, set[str]] = {}
+    for table, column in run(cur, f"""
+        SELECT table_name, column_name FROM {DATABASE}.INFORMATION_SCHEMA.COLUMNS
+        WHERE table_schema = 'RAW'"""):
+        raw_columns.setdefault(table, set()).add(column)
 
     for table, cols in columns.items():
+        cols = [(name, dtype) for name, dtype in cols if name in raw_columns.get(table, set())]
         select = ",\n  ".join(
             CASTS[dtype].format(c=f"raw.{name}") + f" AS {name}" for name, dtype in cols
         )
@@ -146,6 +158,37 @@ def step_model(conn, seed: sqlite3.Connection) -> None:
         started = time.time()
         run(cur, f"INSERT OVERWRITE INTO ANALYTICS.{table} ({names}) SELECT {names} FROM STAGING.{table}")
         log(f"ANALYTICS.{table}: filled from STAGING in {time.time() - started:.0f}s")
+
+
+#: Per-request tables the seed keys by request_id alone. The row access
+#: policy can only guard a table through a tenant_id column, so each gets one,
+#: copied from its request (notes: from the work order's request). Without
+#: this, a restricted role joining through SERVICE_REQUESTS sees one tenant and
+#: reading REQUEST_DESCRIPTIONS directly sees every tenant's resident text.
+#: INTAKE_CHANNELS and SERVICE_CATEGORIES are shared vocabulary, not tenant data.
+TENANT_VIA_REQUEST = [
+    "REQUEST_DESCRIPTIONS", "REQUEST_EVENTS", "REQUEST_ASSIGNMENTS",
+    "REQUEST_ATTACHMENTS", "WORK_ORDERS", "MODEL_PREDICTIONS",
+]
+TENANT_VIA_WORK_ORDER = ["WORK_ORDER_NOTES"]
+
+
+def step_tenant(conn) -> None:
+    """Derive tenant_id on the child tables, so step_secure's policy loop finds them."""
+    cur = conn.cursor()
+    sources = [(t, "ANALYTICS.SERVICE_REQUESTS p", "p.request_id = c.request_id") for t in TENANT_VIA_REQUEST]
+    sources += [(t, "ANALYTICS.WORK_ORDERS p", "p.work_order_id = c.work_order_id") for t in TENANT_VIA_WORK_ORDER]
+    for table, parent, on in sources:
+        started = time.time()
+        run(cur, f"ALTER TABLE ANALYTICS.{table} ADD COLUMN IF NOT EXISTS tenant_id NUMBER(38,0)")
+        run(cur, f"UPDATE ANALYTICS.{table} c SET tenant_id = p.tenant_id FROM {parent} WHERE {on}")
+        # Metadata only (Snowflake does not enforce it), but the schema the SQL
+        # writer reads marks the column as a join to TENANTS.
+        declared = {r[4] for r in run(cur, f"SHOW IMPORTED KEYS IN TABLE ANALYTICS.{table}")}  # fk_column_name
+        if "TENANT_ID" not in declared:
+            run(cur, f"ALTER TABLE ANALYTICS.{table} ADD FOREIGN KEY (tenant_id) REFERENCES ANALYTICS.TENANTS (tenant_id)")
+        missing = run(cur, f"SELECT COUNT(*) FROM ANALYTICS.{table} WHERE tenant_id IS NULL")[0][0]
+        log(f"ANALYTICS.{table}: tenant_id derived in {time.time() - started:.0f}s, {missing} rows without one")
 
 
 def step_secure(conn) -> None:
@@ -253,13 +296,17 @@ def step_verify(conn, seed: sqlite3.Connection) -> bool:
     rcur.execute(f"USE ROLE {DEMO_ROLE}")
     seen = run(rcur, "SELECT DISTINCT t.tenant_code FROM ANALYTICS.SERVICE_REQUESTS sr JOIN ANALYTICS.TENANTS t ON t.tenant_id = sr.tenant_id")
     check([r[0] for r in seen] == [DEMO_TENANT_CODE], f"{DEMO_ROLE} sees only {seen}")
+    # The child tables, read directly rather than through SERVICE_REQUESTS.
+    for table in TENANT_VIA_REQUEST + TENANT_VIA_WORK_ORDER:
+        tenants = run(rcur, f"SELECT COUNT(DISTINCT tenant_id), COUNT_IF(tenant_id IS NULL) FROM ANALYTICS.{table}")[0]
+        check(tuple(tenants) == (1, 0), f"{DEMO_ROLE} sees {tenants[0]} tenant(s) in {table} directly, {tenants[1]} unscoped rows")
     ro.close()
     return ok
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--step", choices=["all", "raw", "model", "secure", "verify"], default="all")
+    parser.add_argument("--step", choices=["all", "raw", "model", "tenant", "secure", "verify"], default="all")
     step = parser.parse_args().step
     seed_path = find_seed()
     seed = sqlite3.connect(seed_path)
@@ -269,6 +316,8 @@ def main() -> None:
         step_raw(conn, seed)
     if step in ("all", "model"):
         step_model(conn, seed)
+    if step in ("all", "tenant"):
+        step_tenant(conn)
     if step in ("all", "secure"):
         step_secure(conn)
     ok = True
