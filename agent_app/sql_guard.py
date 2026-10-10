@@ -14,6 +14,9 @@ the query and checks what it *is*, not how it begins:
 - a SELECT (or a set operation of SELECTs), with no write anywhere inside it
 - only tables the warehouse actually has, named bare
 - no personal-data column in a result, and no ``*`` that could carry one
+- no personal-data column compared, sorted or joined on either: a filter like
+  ``WHERE email = 'x@y.com'`` returns none of the column yet still answers
+  "is this resident in here, and what did they report"
 - a row cap, so one careless query cannot flood the agent's context
 
 Pure functions with no database access. The rolled-back transaction in
@@ -63,7 +66,22 @@ _BLOCKED_FUNCTIONS = {
     "lo_export",
     "dblink",
     "dblink_exec",
+    # Snowflake. The writer writes PostgreSQL, but these parse there too and
+    # run once transpiled. RESULT_SCAN reads an earlier query's result in the
+    # session, which the shared service connection makes someone else's.
+    "result_scan",
+    "last_query_id",
+    "get_ddl",
+    "query_history",
+    "query_history_by_session",
+    "query_history_by_user",
+    "login_history",
+    "login_history_by_user",
 }
+
+#: Snowflake's system functions (SYSTEM$WAIT, SYSTEM$CANCEL_QUERY, ...), all
+#: of them: none answers an analytics question.
+_BLOCKED_FUNCTION_PREFIXES = ("system$",)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -119,6 +137,21 @@ def _is_sensitive(
     # Unqualified: sensitive if any table in the query owns a column by that
     # name. Over-blocks a same-named harmless column, never under-blocks.
     return any(f"{table}.{name}" in sensitive for table in tables)
+
+
+def _harmless_reference(column: exp.Column) -> bool:
+    """
+    A use of a personal-data column outside a select list that reveals nothing.
+
+    ``IS NULL`` / ``IS NOT NULL`` (counting residents who left an email) and a
+    bare ``GROUP BY`` item (per-resident counts, the column itself dropped
+    from the result). Anything else -- a comparison, a LIKE, a sort, a join
+    key -- lets a query test or rank the values without ever returning them.
+    """
+    parent = column.parent
+    if isinstance(parent, exp.Is) and parent.this is column and isinstance(parent.expression, exp.Null):
+        return True
+    return isinstance(parent, exp.Group)
 
 
 def _cap_rows(tree: exp.Expression, max_rows: int) -> bool:
@@ -256,7 +289,7 @@ def guard_select(
             return _blocked(f"the query contains a write ({node.key.upper()})")
         if isinstance(node, exp.Func):
             name = (node.name if isinstance(node, exp.Anonymous) else node.sql_name()).lower()
-            if name in _BLOCKED_FUNCTIONS:
+            if name in _BLOCKED_FUNCTIONS or name.startswith(_BLOCKED_FUNCTION_PREFIXES):
                 return _blocked(f"function {name} is not allowed")
 
     ctes = _cte_names(tree)
@@ -276,6 +309,24 @@ def guard_select(
         tables.add(name)
 
     aliases = _alias_map(tree)
+    # Select lists are handled below (dropped at the root, refused inside);
+    # every other place a personal-data column appears is checked here.
+    projected = {
+        id(column)
+        for select in tree.find_all(exp.Select)
+        for projection in select.expressions
+        for column in projection.find_all(exp.Column)
+    }
+    for column in tree.find_all(exp.Column):
+        if id(column) in projected or _harmless_reference(column):
+            continue
+        if _is_sensitive(column, aliases, sensitive_columns, tables):
+            return _blocked(
+                f"personal data ({column.sql(dialect=dialect)}) can only be checked with "
+                "IS NULL or IS NOT NULL, not compared, sorted or joined on",
+                tables,
+            )
+
     sensitive_tables = {c.split(".")[0] for c in sensitive_columns}
     warnings = []
     for select in tree.find_all(exp.Select):
