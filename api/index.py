@@ -230,7 +230,7 @@ async def handle_chat_data(request: Request, protocol: str = Query("data")):
             reasoning_text=result.reasoning,
             output_text=result.answer,
             data_parts=turn_data_parts(
-                result.status, result.warnings, result.tables, result.unverified_numbers
+                result.status, result.warnings, result.tables, result.unverified_numbers, result.values
             ),
         ):
             yield chunk

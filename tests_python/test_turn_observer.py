@@ -163,3 +163,13 @@ def test_relay_raises_the_turns_exception():
 
     with pytest.raises(ValueError, match="no warehouse"):
         asyncio.run(collect())
+
+
+def test_summary_carries_the_turns_numbers_once_each():
+    from agent_app.turn_observer import TURN_VALUES
+
+    out = {"status": "ok", "rows": [["north", 1204, 0.346, True, None], ["south", 1204, 0.3]], "row_count": 2}
+    assert summarize([("warehouse_query", out)])["values"] == [1204.0, 0.346, 0.3]
+    wide = {"status": "ok", "rows": [[i] for i in range(TURN_VALUES + 50)], "row_count": TURN_VALUES + 50}
+    assert len(summarize([("warehouse_query", wide)])["values"]) == TURN_VALUES
+    assert summarize([("visualize", {"status": "ok", "spec": {"h": 1}})])["values"] == []

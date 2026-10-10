@@ -67,6 +67,30 @@ def request_body_to_agent_history(request_body: RequestBody) -> list[dict]:
     return messages
 
 
+def earlier_turn_values(request_body: RequestBody) -> list[float]:
+    """
+    The numbers earlier turns' queries returned, from the ``data-turn`` parts
+    the browser keeps on each answer and sends back with the history.
+
+    A turn's own ``turn`` part is written after its answer, so the last
+    message never carries one; every earlier assistant message may. Parts of
+    an unknown type parse with their fields kept (vendor.vercel_ai_sdk), which
+    is what makes this readable without a model for it.
+    """
+    values: list[float] = []
+    for message in request_body.messages[:-1]:
+        for part in message.parts:
+            if getattr(part, "type", None) != "data-turn":
+                continue
+            data = getattr(part, "data", None)
+            if not isinstance(data, dict):
+                continue
+            for value in data.get("values") or []:
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    values.append(float(value))
+    return values
+
+
 # ------------------------------------------------------------------------------
 # Outbound: agent output -> AI SDK Data Stream Protocol (SSE)
 # ------------------------------------------------------------------------------
@@ -148,13 +172,18 @@ def turn_data_parts(
     warnings: T.Sequence[str],
     tables: T.Sequence[dict],
     unverified: T.Sequence[str] = (),
+    values: T.Sequence[float] = (),
 ) -> list[tuple[str, dict]]:
     """
     The data parts a finished turn carries: always one ``turn`` (status,
-    warnings, and the numbers no query returned), plus one ``table`` per
-    result offered as a CSV.
+    warnings, the numbers no query returned, and the numbers the queries did
+    return, for the next turn's check), plus one ``table`` per result offered
+    as a CSV.
     """
-    parts = [("turn", {"status": status, "warnings": list(warnings), "unverified": list(unverified)})]
+    parts = [(
+        "turn",
+        {"status": status, "warnings": list(warnings), "unverified": list(unverified), "values": list(values)},
+    )]
     parts.extend(("table", table) for table in tables)
     return parts
 

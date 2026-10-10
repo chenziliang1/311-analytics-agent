@@ -21,7 +21,7 @@ import typing as T
 import uuid
 
 from .agent_response import parse_agent_response
-from .ai_sdk_adapter import get_last_user_message_text, request_body_to_agent_history
+from .ai_sdk_adapter import earlier_turn_values, get_last_user_message_text, request_body_to_agent_history
 from .number_check import unverified_numbers
 from .turn_observer import Listener, TurnObserver, summarize
 from .vendor.vercel_ai_sdk import RequestBody
@@ -49,6 +49,8 @@ class ChatResult:
     tables: list[dict] = dataclasses.field(default_factory=list)
     #: Numbers in the answer that no query this turn returned (number_check).
     unverified_numbers: list[str] = dataclasses.field(default_factory=list)
+    #: The numbers this turn's queries returned (turn_observer.summarize).
+    values: list[float] = dataclasses.field(default_factory=list)
 
     def to_json(self) -> dict:
         return dataclasses.asdict(self)
@@ -64,6 +66,7 @@ class ChatResult:
             warnings=[str(w) for w in data.get("warnings") or []],
             tables=list(data.get("tables") or []),
             unverified_numbers=[str(n) for n in data.get("unverified_numbers") or []],
+            values=[float(v) for v in data.get("values") or []],
         )
 
 
@@ -126,13 +129,23 @@ def _run_locked(agent, request_body: RequestBody, observer: TurnObserver | None)
     reasoning, answer = parse_agent_response(agent.messages, before)
     results = observer.results if observer is not None else []
     summary = summarize(results)
-    conversation = [part.text for message in request_body.messages for part in message.text_parts()]
+    # What the user asked is not new; what an earlier answer said is not
+    # evidence either: earlier turns count through the numbers their queries
+    # returned, which the browser sends back (earlier_turn_values).
+    asked = [
+        part.text
+        for message in request_body.messages
+        if message.role == "user"
+        for part in message.text_parts()
+    ]
     return ChatResult(
         answer=answer or EMPTY_ANSWER,
         reasoning=reasoning,
         input_tokens=int(usage.get("inputTokens", 0) or 0),
         output_tokens=int(usage.get("outputTokens", 0) or 0),
-        unverified_numbers=unverified_numbers(answer, results, conversation),
+        unverified_numbers=unverified_numbers(
+            answer, results, asked, earlier_values=earlier_turn_values(request_body)
+        ),
         **summary,
     )
 

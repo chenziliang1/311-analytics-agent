@@ -148,6 +148,10 @@ def summarize(results: T.Sequence[tuple[str, dict]]) -> dict:
       data, not answerable) is ``ok``: the answer explains it.
     - ``warnings``: each distinct warning a query returned.
     - ``tables``: every result past :data:`CSV_MIN_ROWS` rows, whole.
+    - ``values``: the numbers the queries returned, once each, at most
+      :data:`TURN_VALUES`. The browser sends them back with the history, so
+      a later turn's numbers are checked against what the queries returned,
+      not against what an earlier answer said.
     """
     queries = [out for name, out in results if name == "warehouse_query"]
     statuses = [q.get("status") for q in queries]
@@ -175,4 +179,15 @@ def summarize(results: T.Sequence[tuple[str, dict]]) -> dict:
         for q in queries
         if q.get("status") == "ok" and int(q.get("row_count") or 0) > CSV_MIN_ROWS
     ]
-    return {"status": status, "warnings": warnings, "tables": tables}
+    values: dict[float, None] = {}
+    for q in queries:
+        for row in q.get("rows") or []:
+            for cell in row:
+                if isinstance(cell, (int, float)) and not isinstance(cell, bool) and len(values) < TURN_VALUES:
+                    values.setdefault(float(cell), None)
+    return {"status": status, "warnings": warnings, "tables": tables, "values": list(values)}
+
+
+#: How many of a turn's returned numbers travel back with the history. Past
+#: this a result is a table, and no later answer quotes its thousandth cell.
+TURN_VALUES = 500

@@ -201,3 +201,26 @@ class TestRequestLogging:
         )
         asyncio.run(read_request_body(request))
         assert "sk-secret" not in capsys.readouterr().err
+
+
+def test_earlier_turns_values_come_back_with_the_history():
+    """The browser keeps each answer's turn part and sends it back; the last message has none yet."""
+    from agent_app.ai_sdk_adapter import earlier_turn_values
+
+    body = RequestBody(**{
+        "id": "c",
+        "messages": [
+            {"id": "u1", "role": "user", "parts": [{"type": "text", "text": "How many?"}]},
+            {"id": "a1", "role": "assistant", "parts": [
+                {"type": "text", "text": "1,204."},
+                {"type": "data-turn", "data": {"status": "ok", "warnings": [], "values": [1204, 0.346, True, "x"]}},
+                {"type": "data-table", "data": {"rows": [[9999]]}},
+            ]},
+            {"id": "u2", "role": "user", "parts": [
+                {"type": "text", "text": "And now?"},
+                {"type": "data-turn", "data": {"values": [5]}},
+            ]},
+        ],
+    })
+    assert earlier_turn_values(body) == [1204.0, 0.346]
+    assert earlier_turn_values(RequestBody(**{"id": "c", "messages": [{"id": "u", "role": "user", "parts": [{"type": "data-turn", "data": "junk"}]}]})) == []
