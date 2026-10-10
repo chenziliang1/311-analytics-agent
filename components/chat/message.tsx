@@ -178,6 +178,8 @@ function statusLabel(site: SiteConfig, status: StatusEvent | null): string {
   const labels: Record<string, string> = {
     thinking: site.chat.status.thinking,
     warehouse_query: site.chat.status.warehouseQuery,
+    list_sources: site.chat.status.listSources,
+    read_source: site.chat.status.readSource,
     visualize: site.chat.status.visualize,
     answering: site.chat.status.answering,
   };

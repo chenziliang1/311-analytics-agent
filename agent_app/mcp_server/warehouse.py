@@ -16,6 +16,7 @@ import typing as T
 
 import sqlalchemy as sa
 
+from ..knowledge import source_ids_for
 from ..semantic_layer.api import Match, SemanticRegistry
 from ..sql_guard import guard_select
 from ..sql_utils import fetch_rows, role_statements
@@ -102,6 +103,28 @@ def _unread_term_tables(match: Match, tables: set[str]) -> list[tuple[str, str]]
     ]
 
 
+def run_as_for(deps: WarehouseDeps, user_id: str | None) -> tuple[dict, str | None]:
+    """
+    How ``user_id``'s reads run: ``fetch_rows`` keyword arguments, or why they
+    may not run at all.
+
+    Decided before any SQL is written, by the tenant access configuration and
+    whether the warehouse can switch roles at all; a user whose queries would
+    have to run unscoped is refused instead.
+    """
+    decision = deps.tenant_access.role_for(user_id)
+    if decision.refused:
+        return {}, decision.refused
+    if not decision.switch:
+        return {}, None
+    run_as = dict(role=decision.role, restore_role=deps.tenant_access.internal_role)
+    try:
+        role_statements(deps.engine.dialect.name, **run_as)
+    except ValueError as e:
+        return {}, str(e)
+    return run_as, None
+
+
 def answer(
     deps: WarehouseDeps,
     intent: str,
@@ -126,10 +149,12 @@ def answer(
     """
     started = time.monotonic()
     version = deps.registry.version
-    decision = deps.tenant_access.role_for(user_id)
+    run_as, refused = run_as_for(deps, user_id)
     match, unresolved = _resolve(
         deps.registry, intent, requested_metrics, requested_dimensions, time_window
     )
+    # What an answer built on this query should cite.
+    sources = source_ids_for(match)
     warnings = []
     if any(d.sensitive for d in match.dimensions):
         warnings.append("Residents' personal data cannot be shown; it was left out.")
@@ -144,7 +169,7 @@ def answer(
                 "session_id": session_id or None,
                 "user_role": user_role,
                 # The warehouse role the query ran as; None is the connection's own.
-                "query_role": decision.role,
+                "query_role": run_as.get("role"),
                 "intent": intent,
                 "metrics": [m.name for m in match.metrics],
                 "unresolved_names": unresolved,
@@ -157,27 +182,14 @@ def answer(
         )
         return output
 
-    if decision.refused:
+    if refused:
         # Before the writer is asked: no SQL is written for a user who may not
         # run any, and the refusal is logged with the question.
         return finish(WarehouseQueryOutput(
             status="blocked",
-            warning=f"Refused: {decision.refused}.",
+            warning=f"Refused: {refused}.",
             semantic_layer_version=version,
         ))
-    run_as = {}
-    if decision.switch:
-        run_as = dict(role=decision.role, restore_role=deps.tenant_access.internal_role)
-        try:
-            # A warehouse that cannot switch roles cannot run this user's
-            # query at all; found out here, not after the writer was paid.
-            role_statements(deps.engine.dialect.name, **run_as)
-        except ValueError as e:
-            return finish(WarehouseQueryOutput(
-                status="blocked",
-                warning=f"Refused: {e}.",
-                semantic_layer_version=version,
-            ))
 
     previous_sql = previous_error = None
     for attempt in range(2):
@@ -285,6 +297,7 @@ def answer(
             truncated=result.truncated,
             warning=" ".join(notes) or None,
             semantic_layer_version=version,
+            sources=sources,
         ))
 
     return finish(WarehouseQueryOutput(

@@ -132,3 +132,34 @@ class GlossaryTerm(_Strict):
     #: The table a question about this term is answered from. The warehouse
     #: tool sends a query that does not read it back to the writer once.
     read_from: str | None = None
+
+
+class EntitySource(_Strict):
+    """
+    A kind of knowledge-base document read from the warehouse, one per key.
+
+    The static sources (metrics, terms, windows) come from this layer's own
+    files; an entity source is for context the warehouse holds, such as one
+    customer's profile. Both queries are trusted SQL in the writer's dialect,
+    run as the asking user, so the warehouse's row policies decide which
+    keys exist for them.
+    """
+
+    name: str
+    display_name: str
+    #: One line for the index: what a document of this kind tells the reader.
+    description: str
+    #: Returns ``key`` and ``title``, one row per document, in index order.
+    list_sql: str
+    #: Returns one row for the document whose key is ``:key``; every column is
+    #: shown as ``name: value``.
+    read_sql: str
+    #: Keys are identifiers of this shape, and nothing else is sent to read_sql.
+    key_pattern: str = r"^[A-Za-z0-9_\-]+$"
+
+    @model_validator(mode="after")
+    def _reads_its_key(self) -> "EntitySource":
+        if ":key" not in self.read_sql:
+            raise ValueError(f"source {self.name!r}: read_sql does not use :key")
+        re.compile(self.key_pattern)
+        return self

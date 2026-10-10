@@ -149,6 +149,8 @@ feedbackFailed = "Couldn't save that. Try again."
 [chat.status]
 thinking = "Reading the question"
 warehouseQuery = "Querying the warehouse"
+listSources = "Checking the definitions"
+readSource = "Reading the definition"
 visualize = "Drawing the chart"
 answering = "Writing the answer"
 # After 15 seconds with no answer.
