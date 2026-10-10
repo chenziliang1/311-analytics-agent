@@ -20,9 +20,9 @@ on:
         type: boolean
         default: true
       fast_path:
-        description: "FAST_PATH on: compile plain metric questions, skip the SQL writer"
+        description: "FAST_PATH on, as in production: compile plain metric questions, skip the SQL writer. Untick for a comparison run."
         type: boolean
-        default: false
+        default: true
       golden:
         description: "Another golden file to grade, e.g. data/eval/holdout/colleague.yml; empty grades the golden set"
         required: false
@@ -51,7 +51,8 @@ jobs:
       # Unticking "judge" gives the quick run: result matching only.
       JUDGE: ${{ inputs.judge == false && 'false' || 'true' }}
       CASES: ${{ inputs.cases }}
-      FAST_PATH: ${{ inputs.fast_path == true && 'true' || 'false' }}
+      # On unless unticked, so a run graded by default grades the production setting.
+      FAST_PATH: ${{ inputs.fast_path == false && 'false' || 'true' }}
       GOLDEN: ${{ inputs.golden }}
     steps:
       - name: Check the secrets are set
