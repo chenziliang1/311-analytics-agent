@@ -1,0 +1,9 @@
+name: council_member_name
+display_name: Council Member Name
+expression: cc.council_member_name
+alias: cc
+joins:
+  sr: JOIN citizen_complaints cc ON cc.primary_request_id = sr.request_id
+source_column: citizen_complaints.council_member_name
+redacted: true
+synonyms: [council member, councilman name]

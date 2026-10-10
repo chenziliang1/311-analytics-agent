@@ -173,9 +173,11 @@ class KnowledgeBase:
         sources = [_metric_source(m) for m in self.registry.metrics.values()]
         sources += [_term_source(g) for g in self.registry.glossary]
         sources += [_window_source(w) for w in self.registry.time_windows.values()]
-        # Personal-data dimensions are never shown to a model, so they have no
-        # document either.
-        sources += [_dimension_source(d) for d in self.registry.dimensions.values() if not d.sensitive]
+        # Personal-data and free-text dimensions are never returned, so they
+        # are not something to group by, and have no document.
+        sources += [
+            _dimension_source(d) for d in self.registry.dimensions.values() if not (d.sensitive or d.redacted)
+        ]
         return {s.id: s for s in sources}
 
     def entity_source(self, source_id: str) -> tuple[EntitySource, str] | None:

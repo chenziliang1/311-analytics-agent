@@ -1,0 +1,12 @@
+name: street_address
+display_name: Street Address
+# A street address identifies a household; repeat-at-address analyses need
+# the address_id, never the street. Synonyms stay narrow: "address" on its
+# own is what every repeat-at-address question says.
+expression: a.street_address
+alias: a
+joins:
+  sr: JOIN addresses a ON a.address_id = sr.address_id
+source_column: addresses.street_address
+redacted: true
+synonyms: [street address, street name]

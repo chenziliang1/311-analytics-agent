@@ -32,6 +32,16 @@ display_name: Assembly Line
 expression: w.line_code
 allowed_values: [A, B]
 """,
+    "dimensions/notes.yml": """
+name: notes
+display_name: Inspection Notes
+expression: p.notes
+alias: p
+joins:
+  w: JOIN part p ON p.widget_id = w.id
+source_column: part.notes
+redacted: true
+""",
     "dimensions/owner_email.yml": """
 name: owner_email
 display_name: Owner Email
@@ -74,9 +84,17 @@ def registry(tmp_path):
     return load_registry(tmp_path / "layer")
 
 
-def test_static_sources_cover_every_kind_but_personal_data(registry):
+def test_static_sources_cover_every_kind_but_personal_data_and_free_text(registry):
     ids = set(KnowledgeBase(registry).static_sources)
     assert ids == {"metric/defect_rate", "term/scrap-bin", "window/q1", "dimension/line"}
+    assert registry.redacted_columns == {"part.notes"} and registry.sensitive_columns == {"owner.email"}
+
+
+def test_a_redacted_dimension_names_its_column():
+    from agent_app.semantic_layer.api import Dimension
+
+    with pytest.raises(ValueError, match="source_column"):
+        Dimension(name="n", display_name="N", expression="p.notes", redacted=True)
 
 
 def test_a_metric_document_is_its_definition(registry):
