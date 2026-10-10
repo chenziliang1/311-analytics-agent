@@ -88,6 +88,9 @@ def summarize(scores: list[CaseScore]) -> dict:
     return {
         "runs": len(scores),
         "errors": sum(1 for s in scores if s.error),
+        # How often the fast path fired. With FAST_PATH off this is 0; on, it
+        # is the share of questions the gate judged plain enough to compile.
+        "compiled_runs": sum(1 for s in scores if s.compiled),
         "metrics": metrics,
         "intervals": intervals,
         "thresholds": {k: v[0] for k, v in THRESHOLDS.items()},
@@ -149,7 +152,8 @@ def append_results(path: "Path", summary: dict, when: "datetime.datetime | None"
 
 
 def render(summary: dict) -> str:
-    lines = [f"{summary['runs']} runs, {summary['errors']} errors", ""]
+    compiled = summary.get("compiled_runs", 0)
+    lines = [f"{summary['runs']} runs, {summary['errors']} errors" + (f", {compiled} answered by the fast path" if compiled else ""), ""]
     for name, value in summary["metrics"].items():
         shown = "n/a" if value is None else (f"{value:.1f}s" if "latency" in name else f"{value:.1%}")
         gate = summary["passed"].get(name)
@@ -170,10 +174,11 @@ def render(summary: dict) -> str:
                 "S" if case["sql_ok"] else "s",
                 {True: "A", False: "a", None: "?"}[case["answer_ok"]],
                 {True: "H", False: "-", None: "?"}[case["hallucinated"]],
+                "C" if case.get("compiled") else " ",
             ]
         )
         note = case["error"] or case["judge_reason"]
         lines.append(f"  {flags}  {case['case_id']:24s} {case['seconds']:5.1f}s  {note[:90]}")
     lines.append("")
-    lines.append("  S/s sql result matched/not, A/a answer correct/not, H hallucinated, ? judge off")
+    lines.append("  S/s sql result matched/not, A/a answer correct/not, H hallucinated, ? judge off, C compiled (fast path)")
     return "\n".join(lines)

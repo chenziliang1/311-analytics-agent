@@ -19,6 +19,10 @@ on:
         description: "Run the LLM judge (all five scores)"
         type: boolean
         default: true
+      fast_path:
+        description: "FAST_PATH on: compile plain metric questions, skip the SQL writer"
+        type: boolean
+        default: false
 
 concurrency:
   group: eval-${{ github.ref }}
@@ -43,6 +47,7 @@ jobs:
       # Unticking "judge" gives the quick run: result matching only.
       JUDGE: ${{ inputs.judge == false && 'false' || 'true' }}
       CASES: ${{ inputs.cases }}
+      FAST_PATH: ${{ inputs.fast_path == true && 'true' || 'false' }}
     steps:
       - name: Check the secrets are set
         id: secrets

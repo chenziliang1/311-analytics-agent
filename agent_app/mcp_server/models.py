@@ -44,6 +44,9 @@ class WarehouseQueryOutput(BaseModel):
     #: window/...), whole, with the citation marker for each. No read_source
     #: call is needed for them.
     sources: list[CitedSource] = Field(default_factory=list)
+    #: Who wrote the SQL: the writer model, or the semantic layer's compiler
+    #: (the fast path, when the question named nothing beyond its vocabulary).
+    path: T.Literal["writer", "compiled"] = "writer"
 
 
 class SourceIndexOutput(BaseModel):

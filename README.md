@@ -49,4 +49,4 @@ The eval's questions were written by the same person as the prompt. [`data/eval/
 
 ## Next
 
-Latency. p95 is about 13 seconds, because two models run in series: the agent, then the SQL writer. A question that maps cleanly onto one metric could skip the writer and run the semantic layer's compiled query directly. Streaming the answer token by token would also make the wait feel shorter even where the total time stays the same.
+Latency. p95 is about 13 seconds, because two models run in series: the agent, then the SQL writer. A question that maps cleanly onto one metric can skip the writer and run the semantic layer's compiled query directly: that is `FAST_PATH`, off by default, which compiles a question only when it names exactly one metric and nothing the layer has no word for (`agent_app/semantic_layer/fast_path.py`). The eval has a `fast_path` input; a run with it on and one with it off, compared on accuracy and p95, is what decides whether it goes on by default. Streaming the answer token by token would also make the wait feel shorter even where the total time stays the same.
