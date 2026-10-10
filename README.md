@@ -31,7 +31,7 @@ Browser (Next.js on Vercel) -> agent runtime (AgentCore) -> MCP tools runtime (A
 - **Agent:** Strands Agents with Claude Sonnet 5.5 on AWS Bedrock AgentCore. It interprets the question and words the answer.
 - **Tools:** a separate MCP server, also on AgentCore. `warehouse_query` goes from semantic layer to SQL writer to guard to Snowflake to audit log.
 - **Infrastructure:** AWS CDK, Secrets Manager, and a CloudWatch dashboard with alarms.
-- **Quality loop:** a golden-set eval (97–100% SQL accuracy, 0% hallucination), tests on every push and the eval on demand, and thumbs-downs that become new test cases.
+- **Quality loop:** a golden-set eval (35 cases, 70 runs: 95.7% SQL accuracy, 0% hallucination, 94.8% of answers citing the definition they rest on, p95 12.1 s; every run is a row in [`data/eval/results.md`](data/eval/results.md)), tests on every push and the eval on demand, a morning canary against the live agent, and thumbs-downs that become new test cases.
 
 The decision I would make again: **the agent never writes SQL.** A dedicated writer model does, and it sees the semantic layer's definition and a reference query for every metric the question names. Each number therefore has exactly one definition, and the agent can stay focused on understanding the user.
 
@@ -43,7 +43,7 @@ Read-only is enforced three times. sqlglot parses every query and rejects writes
 
 Tenant scope is the warehouse's job, not the prompt's. A row access policy on every table with a `tenant_id` decides what a query sees by the session's role: the agent's own role sees all 120 tenants, and a role mapped to one tenant sees that tenant, in the per-request tables (descriptions, events, work orders) as well as in the requests. With `TENANT_ROLE_MAP` set, or `TENANT_ROLE_TABLE` naming the warehouse's login-to-role table, the query tool runs each signed-in user's SQL as their mapped role and puts the connection back afterwards; a user the map does not name gets the default role or is refused. The audit log is always written as the agent's own role. Residents' request text, crew notes and complaint narratives are searched and counted but never returned.
 
-The eval's questions were written by the same person as the prompt. [`data/eval/holdout/`](data/eval/holdout/README.md) is where questions by someone else go, graded with `agent-app grade --golden <file>`; it is empty so far.
+The eval's questions were written by the same person as the prompt. [`data/eval/holdout/`](data/eval/holdout/README.md) holds questions written by someone else, graded with `agent-app grade --golden <file>` and never used to tune the prompt. The first file, seven questions from a colleague, scored 71.4% on SQL: the two misses both read "the same problem at the same address" as address-only, which is now the known gap.
 
 ## What I learned
 
@@ -53,4 +53,4 @@ The eval's questions were written by the same person as the prompt. [`data/eval/
 
 ## Next
 
-Latency. p95 is about 13 seconds, because two models run in series: the agent, then the SQL writer. A question that maps cleanly onto one metric can skip the writer and run the semantic layer's compiled query directly: that is `FAST_PATH`, which compiles a question only when it names exactly one metric and nothing the layer has no word for (`agent_app/semantic_layer/fast_path.py`). On by default since the eval of 2026-10-10 answered six of six plain questions right through it at a 4.2 s median against the writer's 8.5 s, with every other question unchanged (`data/eval/results.md`); the eval's `fast_path` input turns it off for a comparison run. Streaming the answer token by token would also make the wait feel shorter even where the total time stays the same.
+Latency. p95 is about 12 seconds, because two models run in series: the agent, then the SQL writer. A question that maps cleanly onto one metric can skip the writer and run the semantic layer's compiled query directly: that is `FAST_PATH`, which compiles a question only when it names exactly one metric and nothing the layer has no word for (`agent_app/semantic_layer/fast_path.py`). On by default since the eval of 2026-10-10 answered six of six plain questions right through it at a 4.2 s median against the writer's 8.5 s, with every other question unchanged (`data/eval/results.md`); the eval's `fast_path` input turns it off for a comparison run. Streaming the answer token by token would also make the wait feel shorter even where the total time stays the same.
