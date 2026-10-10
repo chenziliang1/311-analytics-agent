@@ -15,3 +15,4 @@ hallucination <= 5%, citation >= 70%, p95 <= 15s.
 | 2026-10-10 04:19 | anthropic/claude-sonnet-5-5 | anthropic/claude-sonnet-5-5 | anthropic/claude-sonnet-5-5 | colleague-2026-10:all | 7 | 0 | 71.4% | 71.4% | 14.3% | 50.0% | 13.4 | self-graded judge |
 | 2026-10-10 04:39 | anthropic/claude-sonnet-5-5 | anthropic/claude-sonnet-5-5 | anthropic/claude-sonnet-5-5 | all | 70 | 0 | 95.7% | 95.7% | 5.7% | 93.1% | 12.6 | self-graded judge, fast path on |
 | 2026-10-10 06:02 | anthropic/claude-sonnet-5-5 | anthropic/claude-sonnet-5-5 | anthropic/claude-sonnet-5-5 | all | 70 | 0 | 95.7% | 95.7% | 0.0% | 94.8% | 12.1 | self-graded judge |
+| 2026-10-10 06:28 | anthropic/claude-sonnet-5-5 | anthropic/claude-sonnet-5-5 | anthropic/claude-sonnet-5-5 | all | 70 | 0 | 97.1% | 97.1% | 0.0% | 94.8% | 13.4 | self-graded judge, fast path on |
