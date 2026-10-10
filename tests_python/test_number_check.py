@@ -27,9 +27,18 @@ def test_no_query_at_all_flags_every_data_number():
     assert unverified_numbers("That rose to 1,530 last month.", []) == ["1,530"]
 
 
-def test_numbers_already_in_the_conversation_are_not_new():
-    conversation = ["How many widgets?", "North made 1,204 widgets.", "And as a share of 5,000?"]
-    assert unverified_numbers("1,204 of 5,000.", [], conversation) == []
+def test_numbers_the_user_asked_about_are_not_new():
+    conversation = ["How many widgets?", "And as a share of 5,000?"]
+    assert unverified_numbers("1,204 of 5,000.", [], conversation, earlier_values=[1204]) == []
+
+
+def test_an_earlier_turns_query_values_are_evidence_but_its_answer_text_is_not():
+    """A number invented in turn one must not be verified in turn two by having been said."""
+    earlier_answer = "North made 1,530 widgets."  # 1,530 came from nowhere
+    assert unverified_numbers("Still 1,530 in the north.", [], ["How many?", "And now?"], earlier_values=[1204]) == ["1,530"]
+    # What turn one's query actually returned is.
+    assert unverified_numbers("Still 1,204 in the north.", [], ["How many?", "And now?"], earlier_values=[1204]) == []
+    assert earlier_answer  # the text alone never whitelists
 
 
 def test_numbers_in_the_query_or_its_warning_are_evidence():

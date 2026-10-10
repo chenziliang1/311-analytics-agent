@@ -24,6 +24,8 @@ export type TurnData = {
    * (agent_app/number_check.py). Absent on answers saved before it existed.
    */
   unverified?: string[]
+  /** The numbers the turn's queries returned; sent back with the history. */
+  values?: number[]
 }
 
 /** A result too long for the bubble, whole, for the CSV download. */

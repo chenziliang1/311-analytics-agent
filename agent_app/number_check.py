@@ -29,23 +29,25 @@ def unverified_numbers(
     answer: str,
     results: T.Sequence[tuple[str, dict]],
     conversation: T.Sequence[str] = (),
+    earlier_values: T.Sequence[float] = (),
 ) -> list[str]:
     """
-    Numbers in ``answer`` that match no value this turn's queries returned.
+    Numbers in ``answer`` that match no value a query returned.
 
     :param results: (tool name, output) for each tool call this turn, as
         :class:`~agent_app.turn_observer.TurnObserver` collects them.
-    :param conversation: The text of every message so far, the question being
-        answered included. A number already in it -- one the user asked about,
-        or an earlier answer showed -- is not new, so a follow-up repeating it
-        is not flagged. Earlier turns' rows are not sent back with the history;
-        their numbers live on in the answers that showed them.
+    :param conversation: What the user asked, this turn and before. A number
+        in it is the user's, not new.
+    :param earlier_values: The numbers earlier turns' queries returned, which
+        the browser sends back with the history. An earlier answer's *text*
+        is deliberately not evidence: a number invented in turn one would
+        otherwise be verified in turn two by having been said.
     """
     if not answer:
         return []
     # A ```chart block stays in the answer on purpose: a chart drawn with a
     # number no query returned is the same claim as a sentence with it.
-    values: list = []
+    values: list = list(earlier_values)
     seen = list(conversation)
     for name, output in results:
         if name in _TOOLS_WITH_ROWS:

@@ -62,14 +62,15 @@ function saveChat(chat: StoredChat): void {
 }
 
 /**
- * The messages as the backend gets them. Data parts are for this page only:
- * the backend reads text, and a table part can hold thousands of rows that
- * would otherwise be sent back with every later question.
+ * The messages as the backend gets them. A table part can hold thousands of
+ * rows that would otherwise be sent back with every later question, so it
+ * stays on this page. The small turn part goes: it carries the numbers the
+ * turn's queries returned, which the backend checks later answers against.
  */
 function withoutDataParts(messages: LensUIMessage[]): LensUIMessage[] {
   return messages.map((m) => ({
     ...m,
-    parts: m.parts.filter((p) => !p.type.startsWith("data-")),
+    parts: m.parts.filter((p) => !p.type.startsWith("data-") || p.type === "data-turn"),
   }));
 }
 
