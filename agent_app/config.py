@@ -29,6 +29,35 @@ PLACEHOLDER = "..."
 #: fails deep inside a query with an unhelpful message.
 SCHEMA_NAME_PATTERN = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")
 
+#: Where an unset EVAL_JUDGE_PROVIDER looks first. API-key providers only: a
+#: key in the environment is proof the provider can be called, while Bedrock
+#: credentials are not something config can check.
+JUDGE_PROVIDER_PREFERENCE = (
+    LlmProviderEnum.OPENAI.value,
+    LlmProviderEnum.GOOGLE.value,
+    LlmProviderEnum.ANTHROPIC.value,
+)
+
+#: Bedrock's cross-region inference prefixes, as in ``us.anthropic.claude-...``.
+_BEDROCK_REGION_PREFIXES = {"us", "eu", "apac", "global"}
+
+
+def model_family(provider: str, model_id: str | None) -> str:
+    """
+    Who trained the model, which is what decides whether a judge is impartial.
+
+    A model grading its own family's answers tends to prefer them, so the
+    eval's judge should not share a family with the agent or the SQL writer.
+    The API-key providers each serve their own models; Bedrock serves many
+    vendors', named in the model ID (``us.anthropic.claude-...``).
+    """
+    if provider != LlmProviderEnum.BEDROCK.value:
+        return provider
+    parts = (model_id or "").lower().split(".")
+    if len(parts) > 1 and parts[0] in _BEDROCK_REGION_PREFIXES:
+        parts = parts[1:]
+    return parts[0] or provider
+
 
 def load_env_files() -> None:
     """
@@ -179,8 +208,10 @@ class Config:
     llm_effort: str | None = dataclasses.field(default=None)
     #: The same for the SQL writer.
     sql_writer_effort: str | None = dataclasses.field(default=None)
-    #: The eval's LLM judge. None means the SQL writer's provider and model:
-    #: the strongest model the deployment already pays for.
+    #: The eval's LLM judge. None means the first provider in
+    #: JUDGE_PROVIDER_PREFERENCE that has an API key and a different model
+    #: family from both the agent and the writer; with no such provider, the
+    #: SQL writer's provider and model, flagged by ``judge_is_self_graded``.
     eval_judge_provider: str | None = dataclasses.field(default=None)
     eval_judge_model_id: str | None = dataclasses.field(default=None)
     # --- Tools ---
@@ -284,9 +315,13 @@ class Config:
                 if self.sql_writer_provider == self.llm_provider
                 else DEFAULT_MODEL_ID[self.sql_writer_provider]
             )
-        self.eval_judge_provider = (
-            (self.eval_judge_provider or self.sql_writer_provider).strip().lower()
-        )
+        if not self.eval_judge_provider:
+            graded = self._graded_families()
+            self.eval_judge_provider = next(
+                (p for p in JUDGE_PROVIDER_PREFERENCE if self.api_key_for(p) and p not in graded),
+                self.sql_writer_provider,
+            )
+        self.eval_judge_provider = self.eval_judge_provider.strip().lower()
         if self.eval_judge_provider not in DEFAULT_MODEL_ID:
             raise ValueError(
                 f"Unknown EVAL_JUDGE_PROVIDER {self.eval_judge_provider!r}. "
@@ -298,6 +333,18 @@ class Config:
                 if self.eval_judge_provider == self.sql_writer_provider
                 else DEFAULT_MODEL_ID[self.eval_judge_provider]
             )
+
+    def _graded_families(self) -> set[str]:
+        """The model families whose output the eval grades: agent and writer."""
+        return {
+            model_family(self.llm_provider, self.model_id),
+            model_family(self.sql_writer_provider, self.sql_writer_model_id),
+        }
+
+    @property
+    def judge_is_self_graded(self) -> bool:
+        """The judge shares a model family with what it grades."""
+        return model_family(self.eval_judge_provider, self.eval_judge_model_id) in self._graded_families()
 
     @property
     def llm_api_key(self) -> str | None:

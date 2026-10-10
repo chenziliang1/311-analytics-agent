@@ -41,6 +41,60 @@ class TestConfig:
         assert config.sql_writer_provider == "anthropic"
         assert config.sql_writer_model_id == DEFAULT_MODEL_ID["anthropic"]
 
+    def test_judge_prefers_another_model_family_with_a_key(self):
+        """The judge should not grade its own family's answers."""
+        config = Config(llm_provider="anthropic", anthropic_api_key="a", openai_api_key="o")
+        assert config.eval_judge_provider == "openai"
+        assert not config.judge_is_self_graded
+
+    def test_judge_skips_families_the_agent_or_writer_use(self):
+        config = Config(
+            llm_provider="anthropic",
+            sql_writer_provider="openai",
+            anthropic_api_key="a",
+            openai_api_key="o",
+            google_api_key="g",
+        )
+        assert config.eval_judge_provider == "google"
+
+    def test_judge_without_another_key_falls_back_to_the_writer_and_says_so(self):
+        config = Config(llm_provider="anthropic", anthropic_api_key="a")
+        assert (config.eval_judge_provider, config.eval_judge_model_id) == (
+            config.sql_writer_provider,
+            config.sql_writer_model_id,
+        )
+        assert config.judge_is_self_graded
+
+    def test_explicit_judge_is_kept(self):
+        config = Config(llm_provider="anthropic", eval_judge_provider=" Anthropic ", openai_api_key="o")
+        assert config.eval_judge_provider == "anthropic"
+        assert config.judge_is_self_graded
+
+    @pytest.mark.parametrize(
+        "provider, model_id, family",
+        [
+            ("anthropic", "claude-x", "anthropic"),
+            ("openai", None, "openai"),
+            ("bedrock", "us.anthropic.claude-sonnet-x", "anthropic"),
+            ("bedrock", "us.amazon.nova-lite-v1:0", "amazon"),
+            ("bedrock", "meta.llama3-70b", "meta"),
+        ],
+    )
+    def test_model_family(self, provider, model_id, family):
+        from agent_app.config import model_family
+
+        assert model_family(provider, model_id) == family
+
+    def test_bedrock_claude_agent_is_graded_as_anthropic(self):
+        """Claude on Bedrock is still Claude: an Anthropic judge would be self-grading."""
+        config = Config(
+            llm_provider="bedrock",
+            model_id="us.anthropic.claude-sonnet-x",
+            anthropic_api_key="a",
+        )
+        assert config.eval_judge_provider == "bedrock"
+        assert config.judge_is_self_graded
+
     def test_unknown_sql_writer_provider(self):
         with pytest.raises(ValueError, match="SQL_WRITER_PROVIDER"):
             Config(sql_writer_provider="llama")

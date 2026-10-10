@@ -157,6 +157,13 @@ class Cli:
             f"{config.sql_writer_provider}/{config.sql_writer_model_id}, judge "
             f"{config.eval_judge_provider + '/' + config.eval_judge_model_id if judge else 'off'}"
         )
+        self_graded = bool(judge) and config.judge_is_self_graded
+        if self_graded:
+            print(
+                "Warning: the judge shares a model family with the agent or the writer, "
+                "and may favor their answers. Set EVAL_JUDGE_PROVIDER, or add another "
+                "provider's API key."
+            )
         print(f"{len(selected)} cases, {sum(len(c.questions) for c in selected)} runs\n")
 
         def progress(score):
@@ -176,6 +183,7 @@ class Cli:
             "agent": f"{config.llm_provider}/{config.model_id}",
             "writer": f"{config.sql_writer_provider}/{config.sql_writer_model_id}",
             "judge": f"{config.eval_judge_provider}/{config.eval_judge_model_id}" if judge else None,
+            "judge_self_graded": self_graded,
         }
         path_enum.dir_eval_reports.mkdir(parents=True, exist_ok=True)
         stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
