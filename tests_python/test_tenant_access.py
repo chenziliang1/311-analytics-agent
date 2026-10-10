@@ -51,6 +51,72 @@ def test_a_default_role_alone_enables_scope():
     assert access.role_for("anyone").role == "SHOP_GUEST"
 
 
+class TestRoleDirectory:
+    """A map read from somewhere that can change, refreshed on a clock."""
+
+    @staticmethod
+    def directory(rows, **kwargs):
+        from agent_app.tenant_access import RoleDirectory
+
+        reads = []
+
+        def source():
+            reads.append(1)
+            result = rows[0]
+            if isinstance(result, Exception):
+                raise result
+            return result
+
+        clock = {"t": 0.0}
+        errors = []
+        d = RoleDirectory(source, ttl_seconds=300, clock=lambda: clock["t"], on_error=errors.append, **kwargs)
+        return d, reads, clock, errors
+
+    def test_reads_once_per_ttl(self):
+        rows = [[("ada", "SHOP_PLANT_NORTH")]]
+        d, reads, clock, _ = self.directory(rows)
+        assert d["ada"] == "SHOP_PLANT_NORTH" and d.get("bo") is None and len(d) == 1
+        assert len(reads) == 1
+        rows[0] = [("ada", "SHOP_PLANT_NORTH"), ("bo", "SHOP_RO")]
+        assert "bo" not in d and len(reads) == 1  # still cached
+        clock["t"] = 301
+        assert d["bo"] == "SHOP_RO" and len(reads) == 2
+
+    def test_overrides_win_and_count_as_mapped(self):
+        d, _, _, _ = self.directory([[("ada", "SHOP_PLANT_NORTH")]], overrides={"ada": "SHOP_RO", "cy": "SHOP_GUEST"})
+        assert d["ada"] == "SHOP_RO" and d["cy"] == "SHOP_GUEST" and set(d) == {"ada", "cy"}
+
+    def test_a_failed_read_keeps_the_last_good_map(self):
+        rows = [[("ada", "SHOP_PLANT_NORTH")]]
+        d, _, clock, errors = self.directory(rows)
+        assert d["ada"] == "SHOP_PLANT_NORTH"
+        rows[0] = RuntimeError("warehouse down")
+        clock["t"] = 301
+        assert d["ada"] == "SHOP_PLANT_NORTH" and len(errors) == 1
+
+    def test_before_any_good_read_nobody_is_mapped(self):
+        """Fail closed: with no default role, an unmapped user is refused."""
+        d, _, _, errors = self.directory([RuntimeError("warehouse down")])
+        assert len(d) == 0 and errors
+        access = TenantAccess(internal_role="SHOP_RO", user_roles=d)
+        assert not access.enabled  # nothing mapped and no default: scope is off, as before any table
+        access = TenantAccess(internal_role="SHOP_RO", user_roles=d, default_role="SHOP_GUEST")
+        assert access.role_for("ada").role == "SHOP_GUEST"
+
+    def test_a_bad_role_name_in_the_table_fails_the_read(self):
+        rows = [[("ada", "SHOP RO; DROP")]]
+        d, _, _, errors = self.directory(rows)
+        assert len(d) == 0 and "not a plain identifier" in str(errors[0])
+
+    def test_refresh_forces_the_next_read(self):
+        rows = [[("ada", "SHOP_PLANT_NORTH")]]
+        d, reads, _, _ = self.directory(rows)
+        d["ada"]
+        d.refresh()
+        d["ada"]
+        assert len(reads) == 2
+
+
 def test_parse_role_map():
     assert parse_role_map(None) == {}
     assert parse_role_map(" , ") == {}

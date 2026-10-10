@@ -18,6 +18,7 @@ before: a deployment that serves internal staff only has no mapping to keep.
 
 import dataclasses
 import re
+import time
 import typing as T
 
 #: Warehouse role names, as both Snowflake and PostgreSQL spell unquoted
@@ -29,6 +30,17 @@ ROLE_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]*$")
 def check_role_name(name: str, what: str = "role") -> str:
     if not ROLE_NAME.fullmatch(name or ""):
         raise ValueError(f"{what} {name!r} is not a plain identifier (letters, digits, _ and $)")
+    return name
+
+
+#: A table name as ``schema.table`` or ``db.schema.table``, each part a plain
+#: identifier: it is interpolated into the SELECT that reads the role table.
+TABLE_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]*(\.[A-Za-z_][A-Za-z0-9_$]*){0,2}$")
+
+
+def check_table_name(name: str, what: str = "table") -> str:
+    if not TABLE_NAME.fullmatch(name or ""):
+        raise ValueError(f"{what} {name!r} is not a plain table name (schema.table)")
     return name
 
 
@@ -51,6 +63,62 @@ def parse_role_map(text: str | None) -> dict[str, str]:
             raise ValueError(f"TENANT_ROLE_MAP entry {entry!r} has no login")
         roles[login] = check_role_name(role, "TENANT_ROLE_MAP role")
     return roles
+
+
+class RoleDirectory(T.Mapping[str, str]):
+    """
+    Login -> role, read from somewhere that can change (a warehouse table)
+    and refreshed every ``ttl_seconds``, with a static map laid over it.
+
+    A customer is added by one row in the table, not by a redeploy. When the
+    source fails, the last good reading stays in force rather than every
+    user becoming unmapped at once; before any good reading, nobody is
+    mapped, which with no default role means nobody runs a query: fail
+    closed, loudly.
+    """
+
+    def __init__(
+        self,
+        source: T.Callable[[], T.Iterable[tuple[str, str]]],
+        overrides: T.Mapping[str, str] | None = None,
+        ttl_seconds: float = 300.0,
+        clock: T.Callable[[], float] = time.monotonic,
+        on_error: T.Callable[[Exception], None] | None = None,
+    ):
+        self._source = source
+        self._overrides = dict(overrides or {})
+        self._ttl = ttl_seconds
+        self._clock = clock
+        self._on_error = on_error
+        self._loaded: dict[str, str] = {}
+        self._read_at: float | None = None
+
+    def _current(self) -> dict[str, str]:
+        now = self._clock()
+        if self._read_at is None or now - self._read_at >= self._ttl:
+            try:
+                rows = {}
+                for login, role in self._source():
+                    rows[str(login)] = check_role_name(str(role), "role table role")
+                self._loaded = rows
+            except Exception as e:
+                if self._on_error is not None:
+                    self._on_error(e)
+            self._read_at = now
+        return {**self._loaded, **self._overrides}
+
+    def __getitem__(self, login: str) -> str:
+        return self._current()[login]
+
+    def __iter__(self):
+        return iter(self._current())
+
+    def __len__(self) -> int:
+        return len(self._current())
+
+    def refresh(self) -> None:
+        """Read the source again on the next lookup."""
+        self._read_at = None
 
 
 @dataclasses.dataclass(frozen=True)

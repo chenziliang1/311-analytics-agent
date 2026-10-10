@@ -621,6 +621,29 @@ class TestTenantScope:
         # Sign-in off, or a session with no user, is not an internal analyst either.
         assert answer(deps, "how many widgets").status == "blocked"
 
+    def test_the_map_can_come_from_a_warehouse_table(self, engine, registry, fetches):
+        """One row in the table maps a user; the directory reads it as the service role."""
+        from agent_app.mcp_server.warehouse import role_table_source
+        from agent_app.tenant_access import RoleDirectory, TenantAccess
+
+        with engine.begin() as conn:
+            conn.exec_driver_sql("CREATE TABLE user_role_access (login TEXT, role_name TEXT)")
+            conn.exec_driver_sql("INSERT INTO user_role_access VALUES ('ada', 'SHOP_PLANT_NORTH')")
+        directory = RoleDirectory(role_table_source(engine, "user_role_access"), overrides={"bo": "SHOP_RO"})
+        deps = dataclasses.replace(
+            make_deps(engine, registry, ScriptedWriter(sql("SELECT COUNT(*) AS n FROM widget")), []),
+            tenant_access=TenantAccess(internal_role="SHOP_RO", user_roles=directory),
+        )
+        assert answer(deps, "how many widgets", user_id="ada").status == "ok"
+        assert fetches[-1] == ("SHOP_PLANT_NORTH", "SHOP_RO")
+        assert answer(deps, "how many widgets", user_id="cy").status == "blocked"
+
+    def test_a_role_table_that_is_not_a_table_name_is_refused(self, engine):
+        from agent_app.mcp_server.warehouse import role_table_source
+
+        with pytest.raises(ValueError, match="table name"):
+            role_table_source(engine, "users; DROP TABLE widget")
+
     def test_a_scoped_query_the_warehouse_cannot_switch_is_refused_before_the_writer(self, engine, registry):
         """SQLite has no roles: refused, not run unscoped, and no SQL written for it."""
         writer = ScriptedWriter(sql("SELECT COUNT(*) AS n FROM widget"))
