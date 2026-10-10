@@ -30,6 +30,7 @@ from pathlib import Path
 import yaml
 
 from .eval.grounding import answer_states
+from .results import expand_result_refs
 from .semantic_layer.api import SemanticRegistry, compile_metric
 
 
@@ -169,7 +170,9 @@ def remote_ask(client, runtime_arn: str) -> Ask:  # pragma: no cover - calls the
         }
         started = time.monotonic()
         result = invoke_remote_turn(client, runtime_arn, body, user="canary")
-        return result.answer, time.monotonic() - started
+        # The answer as the user sees it: a `[RESULT:id]` line is that
+        # result's table, carried alongside the text (results.py).
+        return expand_result_refs(result.answer, result.tables), time.monotonic() - started
 
     return ask
 

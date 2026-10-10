@@ -131,6 +131,8 @@ notePrefix = "Note:"
 unverifiedPrefix = "Not in any query result as shown (check if derived):"
 # {rows} is replaced by the row count. Offered when a result has more than 20.
 downloadCsv = "Download all {rows} rows as CSV"
+# Under a result drawn in the answer when it has more rows than are drawn.
+tableRowsShown = "Showing the first {shown} of {rows} rows"
 newChat = "New chat"
 # Next to "New chat" when sign-in is on. {name} is the GitHub login or name.
 signedInAs = "Signed in as {name}"

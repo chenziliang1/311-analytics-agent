@@ -17,6 +17,12 @@ Two things the chat needs that the answer text does not carry:
   a result; the UI offers the full rows as a CSV, shows the tool's warnings,
   and turns a failed query into an error banner. Those come from the
   warehouse_query outputs collected here, not from parsing the prose.
+- **Results by id, numbers never retyped.** Every ok result is named here
+  (``r1``, ``r2``, ...) and kept whole; the model gets the id and a preview
+  of the rows (see ``results``). An answer puts ``[RESULT:r1]`` where the
+  table belongs and the browser draws it from the kept rows, and a visualize
+  call names the id and the columns, and its categories and series are
+  filled in here from the kept rows before the call goes out.
 
 Registered on the agent as a hook provider. One agent serves one turn at a
 time (see ``chat._AGENT_LOCK``), so per-turn state on the observer is safe.
@@ -25,6 +31,9 @@ time (see ``chat._AGENT_LOCK``), so per-turn state on the observer is safe.
 import json
 import typing as T
 import weakref
+
+from .mcp_server.visualize import chart_data
+from .results import preview, result_id
 
 from strands.hooks import (
     AfterToolCallEvent,
@@ -58,8 +67,11 @@ class TurnObserver(HookProvider):
         self.listener: Listener | None = None
         #: ``user_id`` and ``session_id`` for this turn, set by run_agent_turn.
         self.identity: dict[str, str] = {}
-        #: (tool name, parsed output) for every tool call this turn.
+        #: (tool name, parsed output) for every tool call this turn. A
+        #: warehouse_query output is the whole result, with its ``result_id``.
         self.results: list[tuple[str, dict]] = []
+        #: The ok results of this turn by id, whole.
+        self.by_id: dict[str, dict] = {}
         self._tool_calls = 0
 
     @staticmethod
@@ -82,6 +94,7 @@ class TurnObserver(HookProvider):
 
     def _reset(self, event: BeforeInvocationEvent) -> None:
         self.results = []
+        self.by_id = {}
         self._tool_calls = 0
 
     def _emit(self, phase: str, detail: str | None = None) -> None:
@@ -103,14 +116,80 @@ class TurnObserver(HookProvider):
         if name in IDENTIFIED_TOOLS and self.identity:
             # Overwrites whatever the model put there.
             event.tool_use["input"] = {**(event.tool_use.get("input") or {}), **self.identity}
+        if name == "visualize":
+            event.tool_use["input"] = bind_chart(event.tool_use.get("input") or {}, self.by_id)
         tool_input = event.tool_use.get("input") or {}
         detail = tool_input.get("intent") if isinstance(tool_input, dict) else None
         self._emit(event.tool_use.get("name") or "tool", detail)
 
     def _tool_result(self, event: AfterToolCallEvent) -> None:
         output = tool_output(event.result)
-        if output is not None:
-            self.results.append((event.tool_use.get("name") or "", output))
+        if output is None:
+            return
+        name = event.tool_use.get("name") or ""
+        if name == "warehouse_query" and output.get("status") == "ok":
+            output = {**output, "result_id": result_id(len(self.by_id) + 1)}
+            self.by_id[output["result_id"]] = output
+            # The model's copy: the id and the first rows. The whole result
+            # stays here for the browser and the number check.
+            event.result = with_output(event.result, preview(output))
+        self.results.append((name, output))
+
+
+def bind_chart(tool_input: dict, results: T.Mapping[str, dict]) -> dict:
+    """
+    A visualize call's categories and series, from the result it names.
+
+    Whatever the model put in ``categories`` and ``series`` is replaced: the
+    chart's numbers come from the kept rows or not at all. A result id the
+    turn does not have, or a column the result lacks, becomes ``data_error``,
+    which the tool reports back as a render_error with what to fix.
+    """
+    bound = {**tool_input, "categories": [], "series": [], "data_error": ""}
+    rid = str(tool_input.get("result_id") or "")
+    result = results.get(rid)
+    if result is None:
+        known = ", ".join(results) or "none this turn"
+        bound["data_error"] = f"no result {rid!r} in this turn (results: {known}); pass the result_id warehouse_query returned"
+        return bound
+    y = tool_input.get("y")
+    try:
+        categories, series = chart_data(
+            result.get("columns") or [], result.get("rows") or [], str(tool_input.get("x") or ""),
+            [str(c) for c in (y if isinstance(y, list) else [y] if y else [])],
+        )
+    except ValueError as e:
+        bound["data_error"] = str(e)
+        return bound
+    bound["categories"] = categories
+    bound["series"] = [{"name": s.name, "values": s.values} for s in series]
+    return bound
+
+
+def with_output(result: T.Any, output: dict) -> T.Any:
+    """
+    ``result`` (a strands tool result) carrying ``output`` instead of its
+    own, in both places strands keeps it: ``structuredContent`` and the JSON
+    text block. Anything else in the result is kept.
+    """
+    if not isinstance(result, dict):
+        return result
+    replaced = dict(result)
+    if isinstance(result.get("structuredContent"), dict):
+        replaced["structuredContent"] = output
+    content = []
+    for block in result.get("content") or []:
+        text = block.get("text") if isinstance(block, dict) else None
+        if text:
+            try:
+                if isinstance(json.loads(text), dict):
+                    content.append({**block, "text": json.dumps(output, default=str)})
+                    continue
+            except ValueError:
+                pass
+        content.append(block)
+    replaced["content"] = content
+    return replaced
 
 
 def tool_output(result: T.Any) -> dict | None:
@@ -147,7 +226,9 @@ def summarize(results: T.Sequence[tuple[str, dict]]) -> dict:
       when queries ran and every one failed, else ``ok``. A refusal (personal
       data, not answerable) is ``ok``: the answer explains it.
     - ``warnings``: each distinct warning a query returned.
-    - ``tables``: every result past :data:`CSV_MIN_ROWS` rows, whole.
+    - ``tables``: every ok result with rows, whole, with its ``result_id``:
+      the browser shows one where the answer writes ``[RESULT:id]``, and
+      offers a download for one past :data:`CSV_MIN_ROWS` rows.
     - ``values``: the numbers the queries returned, once each, at most
       :data:`TURN_VALUES`. The browser sends them back with the history, so
       a later turn's numbers are checked against what the queries returned,
@@ -170,14 +251,16 @@ def summarize(results: T.Sequence[tuple[str, dict]]) -> dict:
 
     tables = [
         {
+            "result_id": q.get("result_id"),
             "columns": list(q.get("columns") or []),
             "rows": list(q.get("rows") or []),
             "row_count": int(q.get("row_count") or 0),
             "truncated": bool(q.get("truncated")),
+            "download": int(q.get("row_count") or 0) > CSV_MIN_ROWS,
             "sql": q.get("sql"),
         }
         for q in queries
-        if q.get("status") == "ok" and int(q.get("row_count") or 0) > CSV_MIN_ROWS
+        if q.get("status") == "ok" and q.get("rows")
     ]
     values: dict[float, None] = {}
     for q in queries:

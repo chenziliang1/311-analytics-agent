@@ -5,10 +5,13 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 import { citationId, linkCitations } from '@/lib/chat/citations';
+import { resultRef } from '@/lib/chat/results';
 import type { SiteConfig } from '@/lib/site/schema';
 
 import { getBlockRenderer } from './blocks';
 import { Citation } from './Citation';
+import { ResultTable } from './ResultTable';
+import type { TableData } from './types';
 
 interface MarkdownProps {
   children: string;
@@ -16,9 +19,18 @@ interface MarkdownProps {
   /** Present on an answer: lets a `[KB:...]` citation open its document. */
   site?: SiteConfig;
   chatId?: string;
+  /** The answer's query results, drawn where it writes `[RESULT:<id>]`. */
+  tables?: TableData[];
 }
 
-export const Markdown = ({ children, onQuestionClick, site, chatId }: MarkdownProps) => {
+/** The text of a paragraph that holds nothing but text, else null. */
+function onlyText(children: React.ReactNode): string | null {
+  const nodes = Array.isArray(children) ? children : [children];
+  if (nodes.length !== 1 || typeof nodes[0] !== 'string') return null;
+  return nodes[0];
+}
+
+export const Markdown = ({ children, onQuestionClick, site, chatId, tables }: MarkdownProps) => {
   // Preprocess markdown to handle #ask: links with spaces, and to turn the
   // agent's citation markers into links the renderer below can recognise.
   const preprocessedChildren = linkCitations(
@@ -30,7 +42,21 @@ export const Markdown = ({ children, onQuestionClick, site, chatId }: MarkdownPr
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
-          p: ({ children }) => <p className="mb-3 last:mb-0 leading-relaxed">{children}</p>,
+          p: ({ children }) => {
+            // A paragraph that is one `[RESULT:<id>]` is that result's table.
+            const text = onlyText(children);
+            const id = text === null ? null : resultRef(text);
+            if (id) {
+              const table = tables?.find((t) => t.result_id === id);
+              if (table) {
+                return <ResultTable table={table} rowsShown={site?.chat.messages.tableRowsShown ?? ''} />;
+              }
+              // The rows have not arrived (still streaming) or never will
+              // (an id the turn did not return): the reference, quietly.
+              return <p className="mb-3 last:mb-0 text-xs text-muted-foreground">{text}</p>;
+            }
+            return <p className="mb-3 last:mb-0 leading-relaxed">{children}</p>;
+          },
           a: ({ href, children }) => {
             // A citation: the chip fetches and shows the cited document.
             const cited = citationId(href);

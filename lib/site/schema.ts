@@ -103,6 +103,8 @@ export interface SiteConfig {
       unverifiedPrefix: string
       /** The CSV button's label; `{rows}` becomes the row count. */
       downloadCsv: string
+      /** Under a long result drawn in the answer; `{shown}` and `{rows}` become the counts. */
+      tableRowsShown: string
       newChat: string
       /** `{name}` becomes the signed-in user. Shown only when sign-in is on. */
       signedInAs: string
@@ -181,6 +183,7 @@ export const REQUIRED_SITE_KEYS: readonly string[] = [
   "chat.messages.notePrefix",
   "chat.messages.unverifiedPrefix",
   "chat.messages.downloadCsv",
+  "chat.messages.tableRowsShown",
   "chat.messages.newChat",
   "chat.messages.signedInAs",
   "chat.messages.signOut",
