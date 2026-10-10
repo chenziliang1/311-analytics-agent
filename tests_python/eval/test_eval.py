@@ -7,7 +7,7 @@ The eval harness against a fictional widget shop: no model, no database.
 import pytest
 
 from agent_app.eval.grounding import unsupported_numbers
-from agent_app.eval.judge import build_judge_request, parse_verdict
+from agent_app.eval.judge import JUDGE_SYSTEM_PROMPT, build_judge_request, parse_verdict
 from agent_app.eval.live import tool_activity
 from agent_app.eval.matching import golden_rows, match_result, numbers_close, unpivoted
 from agent_app.eval.model import GoldenCase, MatchSpec, load_golden_cases
@@ -105,6 +105,19 @@ class TestJudge:
         )
         for piece in ("1. first", "2. second", "oslo", "status ok", "the answer", "41.2%"):
             assert piece in text
+
+    def test_the_judge_sees_the_definitions_the_agent_was_handed(self):
+        """A restated definition read as an invented claim on the first fast-path run."""
+        output = {
+            "status": "ok", "columns": ["defect_rate"], "rows": [[0.346]],
+            "sources": [{"id": "metric/defect_rate", "title": "Defect Rate",
+                         "text": "# Defect Rate\n\nShare of widgets returned as defective.\n\n- Formula: ...",
+                         "citation": "[KB:metric/defect_rate]"}],
+        }
+        text = build_judge_request(["q"], COLS, ROWS, [output], "34.6% [KB:metric/defect_rate]", [])
+        assert "DEFINITION given with Result 1: Defect Rate" in text
+        assert "Share of widgets returned as defective." in text
+        assert "DEFINITIONS" in JUDGE_SYSTEM_PROMPT and "restating a DEFINITION" in JUDGE_SYSTEM_PROMPT
 
     def test_parse(self):
         v = parse_verdict('Sure.\n{"correct": true, "hallucinated": false, "reason": "ok"}')
