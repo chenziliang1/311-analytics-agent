@@ -143,12 +143,18 @@ def ai_sdk_error_events(error_text: str) -> T.Iterator[str]:
     yield "data: [DONE]\n\n"
 
 
-def turn_data_parts(status: str, warnings: T.Sequence[str], tables: T.Sequence[dict]) -> list[tuple[str, dict]]:
+def turn_data_parts(
+    status: str,
+    warnings: T.Sequence[str],
+    tables: T.Sequence[dict],
+    unverified: T.Sequence[str] = (),
+) -> list[tuple[str, dict]]:
     """
-    The data parts a finished turn carries: always one ``turn`` (status and
-    warnings), plus one ``table`` per result offered as a CSV.
+    The data parts a finished turn carries: always one ``turn`` (status,
+    warnings, and the numbers no query returned), plus one ``table`` per
+    result offered as a CSV.
     """
-    parts = [("turn", {"status": status, "warnings": list(warnings)})]
+    parts = [("turn", {"status": status, "warnings": list(warnings), "unverified": list(unverified)})]
     parts.extend(("table", table) for table in tables)
     return parts
 

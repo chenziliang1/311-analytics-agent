@@ -45,7 +45,10 @@ def test_progress_then_answer_then_data_parts(app, monkeypatch):
     def turn(agent, body, listener, user):
         users.append(user)
         listener({"phase": "warehouse_query", "detail": "widgets"})
-        return ChatResult("3 widgets.", "", 1, 1, status="ok", warnings=["w"], tables=[{"columns": ["a"], "rows": [[1]]}])
+        return ChatResult(
+            "3 widgets.", "", 1, 1, status="ok", warnings=["w"], tables=[{"columns": ["a"], "rows": [[1]]}],
+            unverified_numbers=["42"],
+        )
 
     monkeypatch.setattr(app, "run_agent_turn", turn)
     got = events(TestClient(app.app).post("/api/chat", json=BODY, headers={"x-lens-user": "octocat"}).text)
@@ -53,7 +56,7 @@ def test_progress_then_answer_then_data_parts(app, monkeypatch):
     types_ = [e["type"] for e in got]
     assert types_[0] == "data-status" and got[0]["transient"] is True
     assert types_.index("text-delta") < types_.index("data-turn") < types_.index("data-table") < types_.index("finish")
-    assert got[types_.index("data-turn")]["data"] == {"status": "ok", "warnings": ["w"]}
+    assert got[types_.index("data-turn")]["data"] == {"status": "ok", "warnings": ["w"], "unverified": ["42"]}
 
 
 def test_failed_turn_is_an_error_event(app, monkeypatch):

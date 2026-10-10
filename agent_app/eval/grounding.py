@@ -14,7 +14,9 @@ import typing as T
 
 from .matching import as_number
 
-_NUMBER = re.compile(r"(?<![\w.])-?\d[\d,]*(?:\.\d+)?%?")
+# Thousands separators inside a number, never a comma after it: "987, then"
+# is 987, which a question or an earlier answer may contain as "987".
+_NUMBER = re.compile(r"(?<![\w.])-?\d(?:[\d,]*\d)?(?:\.\d+)?%?")
 _DATE = re.compile(r"\b\d{4}-\d{2}(?:-\d{2})?\b")
 _FENCED_SQL = re.compile(r"```sql.*?```", re.S | re.I)
 

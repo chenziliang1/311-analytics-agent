@@ -125,6 +125,10 @@ errorBanner = "Lens couldn't complete that. Try rephrasing the question."
 retry = "Try again"
 # Starts the grey line under an answer that repeats the query's warnings.
 notePrefix = "Note:"
+# Starts the grey line listing numbers in the answer that no query returned
+# exactly. Most are ratios or differences the agent worked out, hence "check",
+# not "wrong".
+unverifiedPrefix = "Not in any query result as shown (check if derived):"
 # {rows} is replaced by the row count. Offered when a result has more than 20.
 downloadCsv = "Download all {rows} rows as CSV"
 newChat = "New chat"

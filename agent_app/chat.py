@@ -22,6 +22,7 @@ import uuid
 
 from .agent_response import parse_agent_response
 from .ai_sdk_adapter import get_last_user_message_text, request_body_to_agent_history
+from .number_check import unverified_numbers
 from .turn_observer import Listener, TurnObserver, summarize
 from .vendor.vercel_ai_sdk import RequestBody
 
@@ -46,6 +47,8 @@ class ChatResult:
     warnings: list[str] = dataclasses.field(default_factory=list)
     #: Results too long for a chat bubble, whole, for the CSV download.
     tables: list[dict] = dataclasses.field(default_factory=list)
+    #: Numbers in the answer that no query this turn returned (number_check).
+    unverified_numbers: list[str] = dataclasses.field(default_factory=list)
 
     def to_json(self) -> dict:
         return dataclasses.asdict(self)
@@ -60,6 +63,7 @@ class ChatResult:
             status=str(data.get("status") or "ok"),
             warnings=[str(w) for w in data.get("warnings") or []],
             tables=list(data.get("tables") or []),
+            unverified_numbers=[str(n) for n in data.get("unverified_numbers") or []],
         )
 
 
@@ -120,12 +124,15 @@ def _run_locked(agent, request_body: RequestBody, observer: TurnObserver | None)
     usage = invocations[-1].usage if invocations else {}
 
     reasoning, answer = parse_agent_response(agent.messages, before)
-    summary = summarize(observer.results if observer is not None else [])
+    results = observer.results if observer is not None else []
+    summary = summarize(results)
+    conversation = [part.text for message in request_body.messages for part in message.text_parts()]
     return ChatResult(
         answer=answer or EMPTY_ANSWER,
         reasoning=reasoning,
         input_tokens=int(usage.get("inputTokens", 0) or 0),
         output_tokens=int(usage.get("outputTokens", 0) or 0),
+        unverified_numbers=unverified_numbers(answer, results, conversation),
         **summary,
     )
 

@@ -197,7 +197,9 @@ async def handle_chat_data(request: Request, protocol: str = Query("data")):
         for chunk in ai_sdk_message_with_reasoning_generator(
             reasoning_text=result.reasoning,
             output_text=result.answer,
-            data_parts=turn_data_parts(result.status, result.warnings, result.tables),
+            data_parts=turn_data_parts(
+                result.status, result.warnings, result.tables, result.unverified_numbers
+            ),
         ):
             yield chunk
 
