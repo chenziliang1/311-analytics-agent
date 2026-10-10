@@ -58,7 +58,7 @@ name: q1
 display_name: First Quarter
 start: 2026-01-01
 end: 2026-04-01
-synonyms: [first quarter, q1]
+synonyms: [first quarter, q1, first 3 months]
 """,
     "glossary/core.yml": """
 - term: line report
@@ -88,6 +88,12 @@ def test_a_plain_metric_question_compiles(registry):
     assert "1.0 * SUM(w.is_defective) / COUNT(*) AS defect_rate" in p.sql
     assert "w.built_on >= '2026-01-01' AND w.built_on < '2026-04-01'" in p.sql
     assert "GROUP BY w.line_code" in p.sql
+
+
+def test_a_digit_inside_a_defined_windows_name_is_not_a_condition(registry):
+    """"first 3 months" names q1; the 3 is the layer's, not the user's."""
+    p = plan(registry, "defect rate by line over the first 3 months")
+    assert p is not None and p.time_window == "q1"
 
 
 def test_no_dimension_and_no_window_is_still_plain(registry):
