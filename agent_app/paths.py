@@ -60,6 +60,10 @@ class PathEnum:
     # The golden conversations `agent-app eval` grades the agent on.
     path_golden_cases_yml = dir_data / "eval" / "golden_cases.yml"
 
+    # One row per `agent-app grade` run, appended by the command and committed:
+    # the record behind every number the README or a resume quotes.
+    path_eval_results_md = dir_data / "eval" / "results.md"
+
     dir_tmp = dir_project_root / "tmp"
 
     # Written by the agent's ``write_debug_report`` tool.
