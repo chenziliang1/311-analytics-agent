@@ -152,7 +152,7 @@ def scripted_chat(answer, outputs):
 
 def test_run_case_scores_everything():
     chat = scripted_chat(
-        "Oslo 34.6%, Lima 30.6%.\nHow this was computed: returned / shipped.",
+        "Oslo 34.6%, Lima 30.6%.\nHow this was computed: returned / shipped. [KB:metric/defect_rate]",
         [{"status": "ok", "rows": [["oslo", 0.346], ["lima", 0.306]]}],
     )
     judged = []
@@ -163,11 +163,38 @@ def test_run_case_scores_everything():
 
     score = run_case(CASE, CASE.questions[0], chat, lambda sql: (COLS, ROWS), judge)
     assert score.sql_ok and score.answer_ok and score.hallucinated is False
-    assert score.explained is True
+    assert score.cited is True
     # The history turn ran first and its answer was carried into the graded turn.
     assert chat.seen[1][0] == ("user", "How many plants are there?")
     assert chat.seen[1][1][0] == "assistant"
     assert "1. How many plants are there?" in judged[0]
+
+
+class TestCitedCorrectly:
+    """A citation names the document the number rests on; a sentence does not."""
+
+    @staticmethod
+    def score(answer, knows=None, metrics=("defect_rate",)):
+        from agent_app.eval.runner import cited_correctly
+
+        return cited_correctly(answer, list(metrics), knows)
+
+    def test_the_metrics_own_document(self):
+        assert self.score("34.6%. How this was computed: x. [KB:metric/defect_rate]") is True
+
+    def test_an_explanation_without_a_citation_is_not_enough(self):
+        assert self.score("34.6%. How this was computed: returned over shipped.") is False
+
+    def test_citing_only_something_else(self):
+        assert self.score("34.6% [KB:term/scrap-bin]") is False
+
+    def test_an_invented_source_fails_even_next_to_a_right_one(self):
+        known = {"metric/defect_rate"}
+        assert self.score("[KB:metric/defect_rate] [KB:metric/profit]", knows=known.__contains__) is False
+        assert self.score("[KB:metric/defect_rate]", knows=known.__contains__) is True
+
+    def test_no_metric_no_verdict(self):
+        assert self.score("There are 2 plants.", metrics=()) is None
 
 
 def test_earlier_turn_results_count_as_evidence():
@@ -198,10 +225,11 @@ def test_run_case_never_raises():
 
 
 def test_summary_and_render():
-    good = scripted_chat("Oslo 34.6%. How this was computed: x.", [{"status": "ok", "rows": [["oslo", 0.346], ["lima", 0.306]]}])
-    scores = run_all([CASE], good, lambda sql: (COLS, ROWS), None)
+    good = scripted_chat("Oslo 34.6%. How this was computed: x. [KB:metric/defect_rate]", [{"status": "ok", "rows": [["oslo", 0.346], ["lima", 0.306]]}])
+    scores = run_all([CASE], good, lambda sql: (COLS, ROWS), None, knows={"metric/defect_rate"}.__contains__)
     summary = summarize(scores)
     assert summary["metrics"]["sql_accuracy"] == 1.0
+    assert summary["metrics"]["citation_rate"] == 1.0
     assert summary["metrics"]["answer_accuracy"] is None  # judge off
     assert summary["passed"]["sql_accuracy"] is True
     assert summary["passed"]["answer_accuracy"] is None
