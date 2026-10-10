@@ -236,6 +236,23 @@ def test_summary_and_render():
     assert "W01-defects" in render(summary)
 
 
+def test_results_file_records_each_run(tmp_path):
+    import datetime
+
+    from agent_app.eval.report import RESULTS_HEADER, append_results
+
+    good = scripted_chat("Oslo 34.6%. [KB:metric/defect_rate]", [{"status": "ok", "rows": [["oslo", 0.346], ["lima", 0.306]]}])
+    summary = summarize(run_all([CASE], good, lambda sql: (COLS, ROWS), None))
+    summary["config"] = {"agent": "a/m", "writer": "a/w", "judge": None, "cases": "W01"}
+    path = tmp_path / "results.md"
+    when = datetime.datetime(2026, 10, 10, 3, 4, tzinfo=datetime.timezone.utc)
+    row = append_results(path, summary, when, note="first | run")
+    assert row == "| 2026-10-10 03:04 | a/m | a/w | off | W01 | 1 | 0 | 100.0% |  |  | 100.0% | 2.0 | first / run |\n"
+    assert path.read_text(encoding="utf-8") == RESULTS_HEADER + row
+    append_results(path, summary, when)
+    assert path.read_text(encoding="utf-8").count("| 2026-10-10 03:04 |") == 2  # appended, header once
+
+
 def test_load_golden_cases(tmp_path):
     path = tmp_path / "golden.yml"
     path.write_text(

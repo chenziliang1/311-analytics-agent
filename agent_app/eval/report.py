@@ -10,7 +10,9 @@ definition the SQL writer built the query from, which is checkable.
 """
 
 import dataclasses
+import datetime
 import math
+from pathlib import Path
 
 from .runner import CaseScore
 
@@ -63,6 +65,58 @@ def summarize(scores: list[CaseScore]) -> dict:
         "passed": gates,
         "cases": [dataclasses.asdict(s) for s in scores],
     }
+
+
+RESULTS_HEADER = """\
+# Golden-set eval results
+
+One row per `agent-app grade` run, appended by the command itself; the eval
+workflow commits the row it produced. Rates are over the runs that had a
+verdict: the judge columns are blank on a `--nojudge` run, and citation only
+counts runs whose case names a metric. Thresholds: SQL >= 90%, answer >= 85%,
+hallucination <= 5%, citation >= 70%, p95 <= 15s.
+
+| Date (UTC) | Agent | SQL writer | Judge | Cases | Runs | Errors | SQL accuracy | Answer accuracy | Hallucination | Citation | p95 (s) | Note |
+| :--- | :--- | :--- | :--- | :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | :--- |
+"""
+
+
+def _pct(value: float | None) -> str:
+    return "" if value is None else f"{value:.1%}"
+
+
+def results_row(summary: dict, when: "datetime.datetime", note: str = "") -> str:
+    """The Markdown table row recording one run of ``summarize``'s output."""
+    config = summary.get("config") or {}
+    metrics = summary["metrics"]
+    cells = [
+        when.strftime("%Y-%m-%d %H:%M"),
+        config.get("agent") or "",
+        config.get("writer") or "",
+        config.get("judge") or "off",
+        config.get("cases") or "all",
+        str(summary["runs"]),
+        str(summary["errors"]),
+        _pct(metrics["sql_accuracy"]),
+        _pct(metrics["answer_accuracy"]),
+        _pct(metrics["hallucination_rate"]),
+        _pct(metrics["citation_rate"]),
+        "" if metrics["p95_latency_seconds"] is None else f"{metrics['p95_latency_seconds']:.1f}",
+        note.replace("|", "/"),
+    ]
+    return "| " + " | ".join(cells) + " |\n"
+
+
+def append_results(path: "Path", summary: dict, when: "datetime.datetime | None" = None, note: str = "") -> str:
+    """Append this run's row to the results file, creating it with its header. Returns the row."""
+    when = when or datetime.datetime.now(datetime.timezone.utc)
+    row = results_row(summary, when, note)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        path.write_text(RESULTS_HEADER, encoding="utf-8")
+    with path.open("a", encoding="utf-8") as f:
+        f.write(row)
+    return row
 
 
 def render(summary: dict) -> str:

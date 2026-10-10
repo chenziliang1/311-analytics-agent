@@ -205,6 +205,7 @@ class Cli:
             "writer": f"{config.sql_writer_provider}/{config.sql_writer_model_id}",
             "judge": f"{config.eval_judge_provider}/{config.eval_judge_model_id}" if judge else None,
             "judge_self_graded": self_graded,
+            "cases": ",".join(wanted) if wanted else "all",
         }
         path_enum.dir_eval_reports.mkdir(parents=True, exist_ok=True)
         stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -212,6 +213,11 @@ class Cli:
         out.write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
         print("\n" + render(summary))
         print(f"\nReport: {out}")
+        # The committed record: every number quoted anywhere points back here.
+        from agent_app.eval.report import append_results
+
+        append_results(path_enum.path_eval_results_md, summary, note="self-graded judge" if self_graded else "")
+        print(f"Recorded in: {path_enum.path_eval_results_md}")
         failed = [k for k, v in summary["passed"].items() if v is False]
         raise SystemExit(1 if failed else 0)
 
