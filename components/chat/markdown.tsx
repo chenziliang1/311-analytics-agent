@@ -4,19 +4,25 @@ import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
+import type { SiteConfig } from '@/lib/site/schema';
+
 import { getBlockRenderer } from './blocks';
+import { Citation } from './Citation';
 
 interface MarkdownProps {
   children: string;
   onQuestionClick?: (question: string) => void;
+  /** Present on an answer: lets a `[KB:...]` citation open its document. */
+  site?: SiteConfig;
+  chatId?: string;
 }
 
-export const Markdown = ({ children, onQuestionClick }: MarkdownProps) => {
-  // Preprocess markdown to handle #ask: links with spaces
-  const preprocessedChildren = children.replace(
-    /\[([^\]]+)\]\(#ask:([^)]+)\)/g,
-    '[$1](<#ask:$2>)'
-  );
+export const Markdown = ({ children, onQuestionClick, site, chatId }: MarkdownProps) => {
+  // Preprocess markdown to handle #ask: links with spaces, and to turn the
+  // agent's citation markers into links the renderer below can recognise.
+  const preprocessedChildren = children
+    .replace(/\[([^\]]+)\]\(#ask:([^)]+)\)/g, '[$1](<#ask:$2>)')
+    .replace(/\[KB:([a-z_]+\/[A-Za-z0-9_\-]+)\]/g, '[$1](<kb:$1>)');
 
   return (
     <div className="prose prose-sm max-w-none">
@@ -25,6 +31,11 @@ export const Markdown = ({ children, onQuestionClick }: MarkdownProps) => {
         components={{
           p: ({ children }) => <p className="mb-3 last:mb-0 leading-relaxed">{children}</p>,
           a: ({ href, children }) => {
+            // A citation: the chip fetches and shows the cited document.
+            if (href?.startsWith('kb:')) {
+              const id = href.slice('kb:'.length);
+              return site ? <Citation id={id} chatId={chatId} site={site} /> : <code>{id}</code>;
+            }
             // Handle clickable question links
             if (href?.startsWith('#ask:')) {
               const question = decodeURIComponent(href.replace('#ask:', ''));

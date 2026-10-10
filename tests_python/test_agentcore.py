@@ -269,3 +269,48 @@ def test_remote_feedback_goes_to_the_chats_session():
     assert out["status"] == "ok"
     assert sent["runtimeSessionId"] == runtime_session_id("chat-1")
     assert json.loads(sent["payload"]) == {"lens_feedback": {"rating": "up", "session_id": "chat-1"}, "lens_user": "octocat"}
+
+
+def test_a_source_read_is_answered_not_asked():
+    """A citation opened in the browser: read as the signed-in user, never run as a turn."""
+    reads = []
+
+    def reader(source_id, user):
+        reads.append((source_id, user))
+        return {"status": "ok", "id": source_id, "title": "Defect Rate", "text": "# Defect Rate\n\n...", "citation": f"[KB:{source_id}]"}
+
+    agent = FakeAgent()
+    client = TestClient(build_app(lambda: agent, NoMetrics(), source_reader=reader))
+    reply = client.post("/invocations", json={"lens_source": {"id": "metric/defect_rate"}, "lens_user": "octocat"})
+    assert reply.status_code == 200 and reply.json()["title"] == "Defect Rate"
+    assert reads == [("metric/defect_rate", "octocat")] and agent.asked == []
+
+
+def test_remote_source_read_uses_the_chats_session():
+    sent = {}
+
+    class FakeClient:
+        def invoke_agent_runtime(self, **kwargs):
+            sent.update(kwargs)
+            return {"response": io.BytesIO(b'{"status": "not_found", "id": "plant/paris"}')}
+
+    from agent_app.chat import invoke_remote_source
+
+    out = invoke_remote_source(FakeClient(), "arn:aws:bedrock-agentcore:r:1:runtime/a", "plant/paris", "chat-1", "octocat")
+    assert out["status"] == "not_found"
+    assert sent["runtimeSessionId"] == runtime_session_id("chat-1")
+    assert json.loads(sent["payload"]) == {"lens_source": {"id": "plant/paris"}, "lens_user": "octocat"}
+
+
+def test_read_source_via_mcp_passes_the_user_and_unwraps_the_output():
+    from agent_app.chat import read_source_via_mcp
+
+    calls = []
+
+    class FakeMcp:
+        def call_tool_sync(self, tool_use_id, name, arguments):
+            calls.append((name, arguments))
+            return {"structuredContent": {"status": "ok", "id": arguments["id"], "citation": "[KB:x]"}}
+
+    out = read_source_via_mcp(FakeMcp(), "metric/defect_rate", None)
+    assert out["status"] == "ok" and calls == [("read_source", {"id": "metric/defect_rate", "user_id": "anonymous"})]

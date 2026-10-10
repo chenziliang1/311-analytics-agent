@@ -61,11 +61,14 @@ const ReasoningBlock = ({ text }: { text: string }) => {
 export const PreviewMessage = ({
   site,
   message,
+  chatId,
   append,
   onFeedback,
 }: {
   site: SiteConfig;
   message: LensUIMessage;
+  /** The chat's id: a citation's document is read on the chat's own session. */
+  chatId?: string;
   append?: (message: any) => Promise<string | null | undefined>;
   /** Present once the answer is complete; absent while it streams. */
   onFeedback?: (rating: Rating, comment?: string) => Promise<boolean>;
@@ -116,6 +119,8 @@ export const PreviewMessage = ({
                       )}
                     >
                       <Markdown
+                        site={message.role === "assistant" ? site : undefined}
+                        chatId={chatId}
                         onQuestionClick={(question) => {
                           append?.({
                             role: 'user',

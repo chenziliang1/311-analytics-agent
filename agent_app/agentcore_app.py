@@ -21,7 +21,9 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from .ai_sdk_adapter import get_last_user_message_text
 from .chat import (
     FEEDBACK_FIELD,
+    SOURCE_FIELD,
     USER_FIELD,
+    read_source_via_mcp,
     ChatResult,
     feedback_arguments,
     record_feedback_via_mcp,
@@ -31,13 +33,15 @@ from .chat import (
 from .vendor.vercel_ai_sdk import RequestBody
 
 
-def build_app(agent_factory=None, metrics=None, feedback_recorder=None) -> FastAPI:
+def build_app(agent_factory=None, metrics=None, feedback_recorder=None, source_reader=None) -> FastAPI:
     """
     :param agent_factory: Returns the agent; the default is ``one.agent``,
         built in the background at startup so /ping answers right away.
     :param metrics: Where turn metrics go; the default follows the config.
     :param feedback_recorder: Records one vote's record_feedback arguments and
         returns the tool's output; the default calls the MCP server directly.
+    :param source_reader: Takes (source id, user) and returns read_source's
+        output; the default calls the MCP server directly.
     """
     state = {"turns": 0}
     building = threading.Lock()
@@ -86,12 +90,25 @@ def build_app(agent_factory=None, metrics=None, feedback_recorder=None) -> FastA
         agent()  # pragma: no cover - building the agent starts the MCP client
         return record_feedback_via_mcp(one.mcp_client, arguments)  # pragma: no cover
 
+    def read_document(source_id: str, user: str | None) -> dict:
+        if source_reader is not None:
+            return source_reader(source_id, user)
+        from .api import one  # pragma: no cover - the real MCP connection
+
+        agent()  # pragma: no cover
+        return read_source_via_mcp(one.mcp_client, source_id, user)  # pragma: no cover
+
     @app.post("/invocations")
     async def invocations(request: Request):
         try:
             data = await request.json()
         except Exception as e:
             return JSONResponse({"error": f"not JSON: {e}"}, status_code=400)
+        if isinstance(data, dict) and isinstance(data.get(SOURCE_FIELD), dict):
+            # A citation being opened in the browser, not a question.
+            source_id = str(data[SOURCE_FIELD].get("id") or "")
+            output = await run_in_threadpool(read_document, source_id, data.get(USER_FIELD))
+            return JSONResponse(output, status_code=200)
         if isinstance(data, dict) and isinstance(data.get(FEEDBACK_FIELD), dict):
             # A thumbs up or down, not a question.
             arguments = feedback_arguments(data[FEEDBACK_FIELD], data.get(USER_FIELD))

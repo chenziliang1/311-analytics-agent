@@ -86,3 +86,21 @@ def test_feedback_is_recorded_with_the_signed_in_user(app, monkeypatch):
     assert reply.json() == {"status": "ok", "feedback_id": "f1"}
     assert calls[0]["user_id"] == "octocat" and calls[0]["comment"] == "off by one"
     assert client.post("/api/feedback", json={"rating": "meh"}).status_code == 400
+
+
+@pytest.mark.parametrize(
+    "status, http",
+    [("ok", 200), ("not_found", 404), ("blocked", 403), ("error", 502)],
+)
+def test_a_citations_document_is_read_as_the_signed_in_user(app, monkeypatch, status, http):
+    reads = []
+
+    def read(mcp_client, source_id, user):
+        reads.append((source_id, user))
+        return {"status": status, "id": source_id, "title": "Defect Rate"}
+
+    monkeypatch.setattr(app, "read_source_via_mcp", read)
+    app.one.mcp_client = object()
+    reply = TestClient(app.app).get("/api/source/metric/defect_rate?chat=c", headers={"x-lens-user": "octocat"})
+    assert reply.status_code == http and reply.json()["id"] == "metric/defect_rate"
+    assert reads == [("metric/defect_rate", "octocat")]
