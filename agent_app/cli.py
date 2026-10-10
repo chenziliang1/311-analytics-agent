@@ -122,6 +122,7 @@ class Cli:
         agent_model: str = "",
         writer_provider: str = "",
         writer_model: str = "",
+        golden: str = "",
     ) -> None:
         """
         Grade the agent on the golden conversations in data/eval/.
@@ -132,6 +133,9 @@ class Cli:
 
         :param cases: Comma-separated case ids, or id prefixes (``G0``), to run
             a subset. Empty runs all of them.
+        :param golden: Another golden file to grade instead of the default,
+            e.g. ``data/eval/holdout/<name>.yml``: questions written by someone
+            who did not write the prompt (see data/eval/holdout/README.md).
         :param judge: ``--nojudge`` skips the LLM judge: only result matching,
             the explained check and latency are scored.
         :param agent_provider: Overrides LLM_PROVIDER for this run, which is how
@@ -162,9 +166,12 @@ class Cli:
         from agent_app.eval.runner import run_all
         from agent_app.paths import path_enum
 
+        from pathlib import Path
+
+        golden_path = Path(golden) if golden else path_enum.path_golden_cases_yml
         wanted = _as_word_list(cases)
         selected = [
-            c for c in load_golden_cases(path_enum.path_golden_cases_yml)
+            c for c in load_golden_cases(golden_path)
             if not wanted or any(c.id == w or c.id.startswith(w) for w in wanted)
         ]
         config = one.config
@@ -205,7 +212,8 @@ class Cli:
             "writer": f"{config.sql_writer_provider}/{config.sql_writer_model_id}",
             "judge": f"{config.eval_judge_provider}/{config.eval_judge_model_id}" if judge else None,
             "judge_self_graded": self_graded,
-            "cases": ",".join(wanted) if wanted else "all",
+            "cases": (f"{golden_path.stem}:" if golden else "") + (",".join(wanted) if wanted else "all"),
+            "golden": str(golden_path),
         }
         path_enum.dir_eval_reports.mkdir(parents=True, exist_ok=True)
         stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")

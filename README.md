@@ -37,7 +37,9 @@ The same definitions are the agent's knowledge base, in the shape of an `llms.tx
 
 Read-only is enforced three times. sqlglot parses every query and rejects writes, extra statements, unknown tables and residents' personal data. The Snowflake role can only SELECT. Every transaction is rolled back.
 
-Tenant scope is the warehouse's job, not the prompt's. A row access policy on every table with a `tenant_id` decides what a query sees by the session's role: the agent's own role sees all 120 tenants, and a role mapped to one tenant sees that tenant, in the per-request tables (descriptions, events, work orders) as well as in the requests. With `TENANT_ROLE_MAP` set, the query tool runs each signed-in user's SQL as their mapped role and puts the connection back afterwards; a user the map does not name gets the default role or is refused. The audit log is always written as the agent's own role.
+Tenant scope is the warehouse's job, not the prompt's. A row access policy on every table with a `tenant_id` decides what a query sees by the session's role: the agent's own role sees all 120 tenants, and a role mapped to one tenant sees that tenant, in the per-request tables (descriptions, events, work orders) as well as in the requests. With `TENANT_ROLE_MAP` set, or `TENANT_ROLE_TABLE` naming the warehouse's login-to-role table, the query tool runs each signed-in user's SQL as their mapped role and puts the connection back afterwards; a user the map does not name gets the default role or is refused. The audit log is always written as the agent's own role. Residents' request text, crew notes and complaint narratives are searched and counted but never returned.
+
+The eval's questions were written by the same person as the prompt. [`data/eval/holdout/`](data/eval/holdout/README.md) is where questions by someone else go, graded with `agent-app grade --golden <file>`; it is empty so far.
 
 ## What I learned
 
