@@ -196,7 +196,10 @@ def answer(
         ))
 
     previous_sql = previous_error = None
-    for attempt in range(2):
+    # Each kind of second chance is given once (a rewrite for a skipped
+    # table, twice), never traded for another's.
+    repairs = rewrites = db_retries = 0
+    for _ in range(5):
         request = build_request(
             intent, deps.registry, match, deps.schema, previous_sql, previous_error
         )
@@ -234,24 +237,38 @@ def answer(
             max_rows=deps.max_rows,
             dialect=deps.dialect,
             target_dialect=deps.target_dialect,
+            redacted_columns=deps.registry.redacted_columns,
         )
-        if guarded.blocked and guarded.repairable and attempt == 0:
+        if guarded.blocked and guarded.repairable and repairs == 0:
             # A typo, not a boundary: same one repair a database error gets.
+            repairs += 1
             previous_sql, previous_error = reply.sql, f"Refused: {guarded.blocked_reason}"
             continue
         unread = _unread_term_tables(match, guarded.tables) if not guarded.blocked else []
-        if unread and attempt == 0:
+        if unread:
             # The writer recomputed what a table already holds (a health
-            # snapshot from service_requests): its numbers would differ from
-            # the ones customers were shown. One rewrite, then run whatever
-            # comes back -- a recomputed answer beats no answer.
-            previous_sql = reply.sql
-            previous_error = " ".join(
-                f"A question about {term} is answered by reading {table}, "
-                f"and this query does not read it. Rewrite it to read {table}."
-                for term, table in unread
-            )
-            continue
+            # snapshot from service_requests). Its numbers would differ from
+            # the ones customers were shown, and on the first live eval they
+            # did: two rewrites, then no answer rather than a wrong one.
+            if rewrites < 2:
+                rewrites += 1
+                previous_sql = reply.sql
+                previous_error = " ".join(
+                    f"A question about {term} is answered by reading {table}, "
+                    f"and this query does not read it. Rewrite it to read {table}."
+                    for term, table in unread
+                )
+                continue
+            term, table = unread[0]
+            return finish(WarehouseQueryOutput(
+                status="blocked",
+                sql=reply.sql,
+                warning=(
+                    f"Refused: a question about {term} is answered from {table}, and the query "
+                    f"kept recomputing it instead. Ask for the {table} figures directly."
+                ),
+                semantic_layer_version=version,
+            ))
         if guarded.blocked:
             # A boundary is never retried: a second attempt would only be the
             # writer looking for a way around it.
@@ -281,11 +298,14 @@ def answer(
                 warning=f"The warehouse connection failed twice: {result.error}",
                 semantic_layer_version=version,
             ))
-        if result.error:
+        if result.error and db_retries == 0:
             # One repair: a compile error is usually a typo the writer can fix
             # once it sees the database's sentence.
+            db_retries += 1
             previous_sql, previous_error = guarded.sql, result.error
             continue
+        if result.error:
+            break
 
         notes = list(guarded.warnings)
         if result.truncated:

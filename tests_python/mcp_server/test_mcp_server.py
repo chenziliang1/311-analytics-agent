@@ -470,13 +470,31 @@ def test_term_table_skipped_gets_one_rewrite(engine, tmp_path):
     assert "answered by reading widget_summary" in writer.requests[1]
 
 
-def test_term_table_still_skipped_runs_anyway(engine, tmp_path):
+def test_term_table_still_skipped_after_two_rewrites_is_refused(engine, tmp_path):
+    """A recomputed health snapshot is a different number from the one the customer saw."""
     writer = ScriptedWriter(
+        sql("SELECT line_code FROM widget"),
+        sql("SELECT line_code FROM widget"),
         sql("SELECT line_code FROM widget"),
         sql("SELECT line_code FROM widget"),
     )
     out = answer(make_deps(engine, _with_term(tmp_path), writer, []), "the line report")
-    assert out.status == "ok"
+    assert out.status == "blocked" and "widget_summary" in out.warning
+    assert len(writer.requests) == 3 and out.rows == []
+
+
+def test_second_chances_are_not_traded(engine, registry):
+    """A rewrite does not buy a second database repair: a query that fails twice still gives up."""
+    with engine.begin() as conn:
+        conn.exec_driver_sql("CREATE TABLE widget_summary (line_code TEXT, defect_rate REAL)")
+    writer = ScriptedWriter(
+        sql("SELECT nope FROM widget"),
+        sql("SELECT nope FROM widget"),
+        sql("SELECT nope FROM widget"),
+    )
+    deps = make_deps(engine, registry, writer, [])
+    out = answer(deps, "how many widgets")
+    assert out.status == "sql_error" and "failed twice" in out.warning
     assert len(writer.requests) == 2
 
 
