@@ -280,6 +280,37 @@ def record_feedback_via_mcp(mcp_client, arguments: dict) -> dict:
     return tool_output(result) or {"status": "error", "error": "no output from record_feedback"}
 
 
+#: The payload field carrying a knowledge base read to the AgentCore container.
+SOURCE_FIELD = "lens_source"
+
+
+def read_source_via_mcp(mcp_client, source_id: str, user: str | None) -> dict:
+    """
+    Call the MCP server's read_source directly, not through the model: the
+    browser showing a citation's document. Returns the tool's output.
+    """
+    from .turn_observer import tool_output
+
+    result = mcp_client.call_tool_sync(
+        tool_use_id=f"source-{uuid.uuid4()}",
+        name="read_source",
+        arguments={"id": source_id, "user_id": user or "anonymous"},
+    )
+    return tool_output(result) or {"status": "error", "id": source_id, "warning": "no output from read_source"}
+
+
+def invoke_remote_source(client, runtime_arn: str, source_id: str, chat_id: str | None, user: str | None) -> dict:
+    """Ask the agent runtime for a document, through the chat's own warm session."""
+    response = client.invoke_agent_runtime(
+        agentRuntimeArn=runtime_arn,
+        runtimeSessionId=runtime_session_id(chat_id),
+        payload=json.dumps({SOURCE_FIELD: {"id": source_id}, USER_FIELD: user}).encode("utf-8"),
+        contentType="application/json",
+        accept="application/json",
+    )
+    return json.loads(response["response"].read())
+
+
 def invoke_remote_feedback(client, runtime_arn: str, vote: dict, user: str | None) -> dict:
     """Hand a vote to the agent runtime, which records it through its MCP client."""
     response = client.invoke_agent_runtime(

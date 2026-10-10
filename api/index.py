@@ -33,6 +33,8 @@ from agent_app.ai_sdk_adapter import turn_data_parts
 from agent_app.one.api import one  # Main singleton with agent
 from agent_app.chat import feedback_arguments
 from agent_app.chat import invoke_remote_feedback
+from agent_app.chat import invoke_remote_source
+from agent_app.chat import read_source_via_mcp
 from agent_app.chat import invoke_remote_turn
 from agent_app.chat import record_feedback_via_mcp
 from agent_app.chat import relay
@@ -108,6 +110,36 @@ async def handle_feedback(request: Request):
         return JSONResponse({"status": "error", "error": type(e).__name__}, status_code=502)
     debug(f"[Feedback] {vote.get('rating')} from {user or 'anonymous'}: {output.get('status')}")
     return JSONResponse(output, status_code=200 if output.get("status") == "ok" else 400)
+
+
+@app.get("/api/source/{source_id:path}")
+async def handle_source(source_id: str, request: Request, chat: str | None = None):
+    """
+    One knowledge base document, for a citation the user opened in the chat.
+
+    Read by the MCP server as the signed-in user, the same way the agent reads
+    it: locally through the agent's own MCP connection, deployed through the
+    agent runtime, on the chat's own session so the microVM is already warm.
+    """
+    user = request.headers.get("x-lens-user") or None
+    runtime_arn = one.config.agentcore_runtime_arn
+    try:
+        if runtime_arn:
+            output = await run_in_threadpool(
+                invoke_remote_source, one.bedrock_agentcore_client(), runtime_arn, source_id, chat, user
+            )
+        else:
+
+            def read():
+                _ = one.agent  # building the agent starts its MCP client
+                return read_source_via_mcp(one.mcp_client, source_id, user)
+
+            output = await run_in_threadpool(read)
+    except Exception as e:
+        debug(f"[Source] {source_id} failed: {type(e).__name__}: {e}")
+        return JSONResponse({"status": "error", "id": source_id, "warning": type(e).__name__}, status_code=502)
+    status = {"ok": 200, "not_found": 404, "blocked": 403}.get(str(output.get("status")), 502)
+    return JSONResponse(output, status_code=status)
 
 
 @app.post("/api/chat")

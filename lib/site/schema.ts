@@ -115,6 +115,12 @@ export interface SiteConfig {
       feedbackThanks: string
       feedbackFailed: string
     }
+    /** The panel a citation chip in an answer opens. */
+    citation: {
+      loading: string
+      failed: string
+      close: string
+    }
     /** The spinner's line for each step a turn reports while it runs. */
     status: {
       thinking: string
@@ -184,6 +190,9 @@ export const REQUIRED_SITE_KEYS: readonly string[] = [
   "chat.messages.feedbackSend",
   "chat.messages.feedbackThanks",
   "chat.messages.feedbackFailed",
+  "chat.citation.loading",
+  "chat.citation.failed",
+  "chat.citation.close",
   "chat.status.thinking",
   "chat.status.warehouseQuery",
   "chat.status.listSources",
