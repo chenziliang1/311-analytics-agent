@@ -39,8 +39,9 @@ Read-only analytics over a 311 service request warehouse for 120 North American
 cities and counties. Call warehouse_query for any number, count, rate or ranking;
 it writes, checks and runs the SQL, and returns the ids of the definitions it
 used. Call read_source to read a definition before saying what a number means,
-and cite it. Call list_sources to find an id you do not have. Call visualize to
-turn a result into a chart block the user's browser draws.
+and cite it. Call list_sources to find an id you do not have. Every ok result
+has a result_id: write [RESULT:<id>] on its own line to show its rows, and
+call visualize with the id and column names to chart them. Never retype rows.
 """
 
 
@@ -235,11 +236,13 @@ def build_server(deps_factory=default_deps, feedback_factory=default_feedback_si
             user_id: Leave empty: filled in by the system for the audit log.
             session_id: Leave empty: filled in by the system for the audit log.
 
-        Returns status ok with columns and rows, or: empty (no rows matched),
-        needs_clarification (ask the user the returned clarification),
-        blocked (refused as unsafe, as personal data, or as not answerable
-        from this warehouse), timeout, sql_error.
-        Pass any warning on to the user.
+        Returns status ok with columns, rows and a result_id, or: empty (no
+        rows matched), needs_clarification (ask the user the returned
+        clarification), blocked (refused as unsafe, as personal data, or as
+        not answerable from this warehouse), timeout, sql_error.
+        Pass any warning on to the user. To show the rows, write
+        [RESULT:<result_id>] on its own line instead of retyping them; to
+        chart them, pass the result_id to visualize.
         """
         return answer(
             deps_factory(),
@@ -287,29 +290,46 @@ def build_server(deps_factory=default_deps, feedback_factory=default_feedback_si
 
     @server.tool(name="visualize")
     def visualize(
+        result_id: str,
+        x: str,
+        y: list[str],
         chart_type: str,
         title: str,
-        categories: list[str],
-        series: list[ChartSeries],
         y_label: str = "",
+        categories: list[str] | None = None,
+        series: list[ChartSeries] | None = None,
+        data_error: str = "",
     ) -> VisualizeOutput:
         """
-        Check chart data and return a ```chart block for the user's browser to
-        draw. Paste the returned block into your answer exactly as given.
+        Draw a chart from a result warehouse_query returned, by naming the
+        result and its columns: the numbers are taken from the result's rows
+        by the system, never typed. Returns a ```chart block to paste into
+        your answer exactly as given.
 
         Args:
+            result_id: The result_id of the warehouse_query result to draw.
+            x: The column whose values label the x-axis (e.g. size_tier,
+                month). At most 24 rows draw.
+            y: The numeric columns to draw, one series each, at most 4.
             chart_type: "bar" to compare categories, "line" for change over an
                 ordered scale such as months.
             title: The chart title.
-            categories: The x-axis labels, at most 24.
-            series: At most 4, each with a name and exactly one number per
-                category. Plain numbers: put the unit in y_label.
             y_label: The unit, e.g. "%".
+            categories: Leave empty: filled in by the system from the result.
+            series: Leave empty: filled in by the system from the result.
+            data_error: Leave empty: set by the system.
 
-        Returns status ok with the block, unsupported (show a Markdown table
-        instead), or render_error with what to fix.
+        Returns status ok with the block, unsupported (show the result as a
+        table instead), or render_error with what to fix.
         """
-        return build_chart(chart_type, title, categories, series, y_label)
+        if data_error:
+            return VisualizeOutput(status="render_error", chart_type=chart_type, result_id=result_id, error=data_error)
+        if not categories or not series:
+            return VisualizeOutput(
+                status="render_error", chart_type=chart_type, result_id=result_id,
+                error="no rows were bound to this call; pass the result_id warehouse_query returned",
+            )
+        return build_chart(chart_type, title, categories, series, y_label, result_id=result_id)
 
     @server.tool(name=FEEDBACK_TOOL)
     def record_feedback(

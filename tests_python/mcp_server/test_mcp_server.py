@@ -415,6 +415,11 @@ def test_server_lists_and_calls_tools(engine, registry):
             chart = await client.call_tool(
                 "visualize",
                 {
+                    # As the agent's observer sends it: the result named, the
+                    # rows bound from the kept result (turn_observer.bind_chart).
+                    "result_id": "r1",
+                    "x": "line",
+                    "y": ["s"],
                     "chart_type": "line",
                     "title": "t",
                     "categories": ["A"],
@@ -716,3 +721,53 @@ class TestSwitches:
         # A question that matches no metric goes through as before.
         out = answer(deps, "how many widgets per line")
         assert out.status == "ok"
+
+
+class TestChartData:
+    def test_columns_become_categories_and_series(self):
+        from agent_app.mcp_server.visualize import chart_data
+
+        categories, series = chart_data(["tier", "rate", "n"], [["small", 0.1, 3], ["large", 0.25, 7]], "tier", ["rate", "n"])
+        assert categories == ["small", "large"]
+        assert [(s.name, s.values) for s in series] == [("rate", [0.1, 0.25]), ("n", [3.0, 7.0])]
+
+    def test_what_cannot_be_drawn_says_why(self):
+        from agent_app.mcp_server.visualize import chart_data
+
+        with pytest.raises(ValueError, match="column 'month' is not in the result; its columns are tier, rate"):
+            chart_data(["tier", "rate"], [["a", 1]], "month", ["rate"])
+        with pytest.raises(ValueError, match="not a number"):
+            chart_data(["tier", "rate"], [["a", None]], "tier", ["rate"])
+        with pytest.raises(ValueError, match="not a number"):
+            chart_data(["tier", "flag"], [["a", True]], "tier", ["flag"])
+        with pytest.raises(ValueError, match="y names no column"):
+            chart_data(["tier"], [["a"]], "tier", [])
+
+    def test_the_tool_refuses_a_call_without_bound_rows(self):
+        from mcp.shared.memory import create_connected_server_and_client_session
+
+        server = build_server(deps_factory=lambda: None, feedback_factory=lambda: None)
+
+        async def run():
+            async with create_connected_server_and_client_session(server) as client:
+                unbound = await client.call_tool("visualize", {
+                    "result_id": "r1", "x": "tier", "y": ["rate"], "chart_type": "bar", "title": "t",
+                })
+                errored = await client.call_tool("visualize", {
+                    "result_id": "r1", "x": "tier", "y": ["rate"], "chart_type": "bar", "title": "t",
+                    "data_error": "no result 'r1' in this turn",
+                })
+                bound = await client.call_tool("visualize", {
+                    "result_id": "r1", "x": "tier", "y": ["rate"], "chart_type": "line", "title": "t",
+                    "categories": ["a", "b"], "series": [{"name": "rate", "values": [1, 2]}],
+                })
+                return unbound, errored, bound
+
+        unbound, errored, bound = asyncio.run(run())
+        assert unbound.structuredContent["status"] == "render_error"
+        assert "pass the result_id" in unbound.structuredContent["error"]
+        assert errored.structuredContent["error"] == "no result 'r1' in this turn"
+        assert bound.structuredContent["status"] == "ok" and bound.structuredContent["result_id"] == "r1"
+        block = bound.structuredContent["block"]
+        payload = json.loads(block.removeprefix("```chart\n").removesuffix("\n```"))
+        assert payload["categories"] == ["a", "b"] and payload["series"] == [{"name": "rate", "values": [1.0, 2.0]}]

@@ -10,6 +10,8 @@ without a model, a database, or a web app.
 import json
 import time
 
+from ..results import expand_result_refs
+from ..turn_observer import TurnObserver, summarize
 from .runner import Turn
 
 
@@ -99,8 +101,16 @@ def app_chat():  # pragma: no cover - drives the real agent
         # The endpoint resets the agent's history to the request's, so what is
         # left in it now is exactly this turn's tool activity plus that history.
         calls, outputs = tool_activity(one.agent.messages)
+        # The history holds the model's preview of each result; the observer
+        # kept the whole of it, which is what the grader compares. The judge
+        # reads the answer as the user sees it: with the referenced tables.
+        observer = TurnObserver.of(one.agent)
+        answer = _sse_text(response.text)
+        if observer is not None:
+            outputs = [out for name, out in observer.results if name == "warehouse_query"]
+            answer = expand_result_refs(answer, summarize(observer.results)["tables"])
         return Turn(
-            answer=_sse_text(response.text),
+            answer=answer,
             seconds=seconds,
             tool_calls=calls,
             query_outputs=outputs,

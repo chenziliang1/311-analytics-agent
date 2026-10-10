@@ -7,7 +7,7 @@ import { Fragment, useState } from "react";
 import { AssistantAvatar } from "./AssistantAvatar";
 import { Markdown } from "./markdown";
 import { CsvDownload, FeedbackButtons, NoteLine, type Rating } from "./TurnExtras";
-import type { LensUIMessage, StatusEvent } from "./types";
+import type { LensUIMessage, StatusEvent, TableData } from "./types";
 import { cn } from "@/lib/utils";
 import type { SiteConfig } from "@/lib/site/schema";
 
@@ -74,6 +74,7 @@ export const PreviewMessage = ({
   onFeedback?: (rating: Rating, comment?: string) => Promise<boolean>;
 }) => {
   const tables = message.parts.filter((part) => part.type === "data-table");
+  const tableData = tables.map((part: any) => part.data as TableData);
   return (
     <motion.div
       className="w-full mx-auto max-w-3xl group/message"
@@ -121,6 +122,7 @@ export const PreviewMessage = ({
                       <Markdown
                         site={message.role === "assistant" ? site : undefined}
                         chatId={chatId}
+                        tables={tableData}
                         onQuestionClick={(question) => {
                           append?.({
                             role: 'user',
@@ -149,6 +151,9 @@ export const PreviewMessage = ({
                   );
                 }
                 if (part.type === "data-table") {
+                  // A short result is drawn in the answer; only a long one
+                  // is worth a file. Older answers carried long ones only.
+                  if (part.data.download === false) return null;
                   return (
                     <CsvDownload
                       key={index}

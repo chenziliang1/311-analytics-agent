@@ -28,12 +28,19 @@ export type TurnData = {
   values?: number[]
 }
 
-/** A result too long for the bubble, whole, for the CSV download. */
+/**
+ * One query result, whole. Drawn where the answer writes `[RESULT:<id>]`
+ * (lib/chat/results.ts), and offered as a CSV when `download` is set.
+ */
 export type TableData = {
+  /** Absent on answers saved before results had ids: those only download. */
+  result_id?: string | null
   columns: string[]
   rows: Cell[][]
   row_count: number
   truncated: boolean
+  /** Absent on older answers, which only carried tables worth downloading. */
+  download?: boolean
   sql?: string | null
 }
 
