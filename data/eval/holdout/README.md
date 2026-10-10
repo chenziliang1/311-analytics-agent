@@ -26,4 +26,12 @@ Its row in `results.md` names the file in the Cases column.
 
 ## What is here
 
-Nothing yet. Every question so far was written by the project's author.
+- `colleague-2026-10.yml`: ten questions from one person on 2026-10-09, seven
+  with reference SQL verified on the warehouse. The other three asked for a
+  crew's first visit time, a report's language, and the cost of repeat
+  visits, none of which the warehouse holds; they are listed in the file's
+  header as dropped, because "the data cannot answer it" is part of the
+  finding. Where a question read differently from the golden set's wording
+  ("the same problem at the same address" is the same category, not just the
+  same address), the reference follows the question, and the `source` field
+  says so.

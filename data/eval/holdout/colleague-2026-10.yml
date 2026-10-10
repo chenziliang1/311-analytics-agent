@@ -1,0 +1,222 @@
+# Ten questions written on 2026-10-09 by someone who had read only
+# data/business-context.md (see README.md). Seven are here with reference SQL;
+# three were dropped because the warehouse cannot answer them, not reworded:
+#
+#   - median time to the first crew visit: no visit timestamp exists, only a
+#     work order's opened_at and closed_at
+#   - French- vs English-language reports: language is a tenant attribute
+#     (has_french_vocab), not a request attribute
+#   - spend on repeat crew visits: no cost column anywhere
+#
+# Where a question left something open, the reference takes the warehouse's
+# own definition (an SLA breach is a closed request past its target) and the
+# question's literal words ("the same problem at the same address" is the
+# same category at the same address), and says so in `source`.
+
+- id: H01-other-pothole-streetlight-may
+  source: colleague q1
+  questions:
+  - 'In May 2026, how many requests were put in "Other" even though the resident''s description explicitly mentioned a pothole or a streetlight?'
+  reference_sql: |
+    SELECT COUNT(*) AS request_count
+    FROM service_requests sr
+    JOIN service_categories sc ON sc.category_id = sr.auto_category_id
+    JOIN request_descriptions rd ON rd.request_id = sr.request_id
+    WHERE sc.is_other = 1
+      AND sr.created_at >= '2026-05-01' AND sr.created_at < '2026-06-01'
+      AND (LOWER(rd.description_text) LIKE '%pothole%'
+           OR LOWER(rd.description_text) LIKE '%streetlight%'
+           OR LOWER(rd.description_text) LIKE '%street light%')
+  match:
+    values:
+    - request_count
+  metrics:
+  - other_misroute_rate
+
+- id: H02-breach-rate-wrong-vs-right-category
+  source: colleague q2. "Missed their service deadline" is an SLA breach, which the warehouse records for closed requests, so the rate is over closed audited requests.
+  questions:
+  - For requests filed from June 2025 through April 2026, what percentage of audited requests with the wrong category missed their service deadline, compared with those categorized correctly?
+  reference_sql: |
+    SELECT CASE WHEN mp.predicted_category_id = mp.ground_truth_category_id THEN 0 ELSE 1 END AS is_wrong,
+           COUNT(*) AS closed_requests,
+           ROUND(1.0 * SUM(CASE WHEN sbl.breach_id IS NOT NULL THEN 1 ELSE 0 END) / COUNT(*), 3) AS sla_breach_rate
+    FROM service_requests sr
+    JOIN model_predictions mp ON mp.request_id = sr.request_id
+    LEFT JOIN sla_breach_log sbl ON sbl.request_id = sr.request_id
+    WHERE mp.is_audited = 1
+      AND sr.closed_at IS NOT NULL
+      AND sr.created_at >= '2025-06-01' AND sr.created_at < '2026-05-01'
+    GROUP BY 1
+    ORDER BY 1
+  match:
+    values:
+    - sla_breach_rate
+  metrics:
+  - sla_breach_rate
+  - classifier_accuracy
+
+- id: H03-worst-category-error-cities
+  source: colleague q3
+  questions:
+  - During the period from June 2025 through April 2026, which five cities had the highest percentage of incorrect categories in their audited requests?
+  reference_sql: |
+    SELECT t.tenant_code,
+           COUNT(*) AS audited_requests,
+           ROUND(1.0 * SUM(CASE WHEN mp.predicted_category_id <> mp.ground_truth_category_id THEN 1 ELSE 0 END) / COUNT(*), 3) AS error_rate
+    FROM model_predictions mp
+    JOIN service_requests sr ON sr.request_id = mp.request_id
+    JOIN tenants t ON t.tenant_id = sr.tenant_id
+    WHERE mp.is_audited = 1
+      AND sr.created_at >= '2025-06-01' AND sr.created_at < '2026-05-01'
+    GROUP BY t.tenant_code
+    ORDER BY error_rate DESC, t.tenant_code
+    LIMIT 5
+  match:
+    labels:
+    - tenant_code
+    values:
+    - error_rate
+    top: 5
+  metrics:
+  - classifier_accuracy
+
+- id: H04-gas-leak-live-wire-low-priority
+  source: colleague q4
+  questions:
+  - From June 2025 through April 2026, how many requests described a gas leak or a live electrical wire but were marked low or medium priority?
+  reference_sql: |
+    SELECT COUNT(*) AS request_count
+    FROM service_requests sr
+    JOIN request_descriptions rd ON rd.request_id = sr.request_id
+    WHERE sr.stated_severity IN ('low', 'medium')
+      AND sr.created_at >= '2025-06-01' AND sr.created_at < '2026-05-01'
+      AND (LOWER(rd.description_text) LIKE '%gas leak%'
+           OR LOWER(rd.description_text) LIKE '%live wire%')
+  match:
+    values:
+    - request_count
+
+- id: H06-same-problem-repeat-quick-close
+  source: colleague q6. "Another request for the same problem at the same address" is a later non-duplicate request with the same address and the same category, created within 30 days of the closure; the window is on the closure date, as the question says.
+  questions:
+  - For requests closed from June 2025 through April 2026, what percentage had another request for the same problem at the same address within 30 days, comparing requests closed within 24 hours of submission with those closed later?
+  reference_sql: |
+    WITH base AS (
+      SELECT sr.request_id, sr.address_id, sr.auto_category_id, sr.created_at, sr.closed_at,
+             CASE WHEN (EXTRACT(EPOCH FROM CAST(sr.closed_at AS TIMESTAMP)) / 86400.0)
+                     - (EXTRACT(EPOCH FROM CAST(sr.created_at AS TIMESTAMP)) / 86400.0) <= 1.0
+                  THEN 1 ELSE 0 END AS is_quick_close
+      FROM service_requests sr
+      WHERE sr.closed_at IS NOT NULL
+        AND sr.address_id IS NOT NULL
+        AND sr.is_duplicate = 0
+        AND sr.closed_at >= '2025-06-01' AND sr.closed_at < '2026-05-01'
+    ), repeats AS (
+      SELECT b.request_id,
+             MAX(CASE WHEN n.request_id IS NOT NULL THEN 1 ELSE 0 END) AS has_repeat
+      FROM base b
+      LEFT JOIN service_requests n
+        ON n.address_id = b.address_id
+       AND n.auto_category_id = b.auto_category_id
+       AND n.request_id <> b.request_id
+       AND n.is_duplicate = 0
+       AND n.created_at > b.closed_at
+       AND (EXTRACT(EPOCH FROM CAST(n.created_at AS TIMESTAMP)) / 86400.0)
+           - (EXTRACT(EPOCH FROM CAST(b.closed_at AS TIMESTAMP)) / 86400.0) <= 30
+      GROUP BY b.request_id
+    )
+    SELECT b.is_quick_close,
+           COUNT(*) AS closed_requests,
+           ROUND(1.0 * SUM(r.has_repeat) / COUNT(*), 3) AS repeat_rate
+    FROM base b
+    JOIN repeats r ON r.request_id = b.request_id
+    GROUP BY b.is_quick_close
+    ORDER BY b.is_quick_close
+  match:
+    values:
+    - repeat_rate
+  metrics:
+  - repeat_at_address_rate
+
+- id: H07-on-time-drop-same-problem-repeat
+  source: colleague q7. Same repeat definition as H06; the drop is in percentage points of the on-time rate over requests closed in the window.
+  questions:
+  - Which five cities would see the largest percentage-point drop in their on-time closure rate for requests closed from June 2025 through April 2026 if a new report of the same problem at the same address within 30 days counted as a failed repair?
+  reference_sql: |
+    WITH base AS (
+      SELECT sr.request_id, sr.tenant_id, sr.address_id, sr.auto_category_id, sr.closed_at,
+             CASE WHEN sbl.breach_id IS NULL THEN 1 ELSE 0 END AS is_on_time
+      FROM service_requests sr
+      LEFT JOIN sla_breach_log sbl ON sbl.request_id = sr.request_id
+      WHERE sr.closed_at IS NOT NULL
+        AND sr.address_id IS NOT NULL
+        AND sr.is_duplicate = 0
+        AND sr.closed_at >= '2025-06-01' AND sr.closed_at < '2026-05-01'
+    ), repeats AS (
+      SELECT b.request_id,
+             MAX(CASE WHEN n.request_id IS NOT NULL THEN 1 ELSE 0 END) AS has_repeat
+      FROM base b
+      LEFT JOIN service_requests n
+        ON n.address_id = b.address_id
+       AND n.auto_category_id = b.auto_category_id
+       AND n.request_id <> b.request_id
+       AND n.is_duplicate = 0
+       AND n.created_at > b.closed_at
+       AND (EXTRACT(EPOCH FROM CAST(n.created_at AS TIMESTAMP)) / 86400.0)
+           - (EXTRACT(EPOCH FROM CAST(b.closed_at AS TIMESTAMP)) / 86400.0) <= 30
+      GROUP BY b.request_id
+    )
+    SELECT t.tenant_code,
+           COUNT(*) AS closed_requests,
+           ROUND(1.0 * SUM(b.is_on_time) / COUNT(*), 3) AS reported_on_time_rate,
+           ROUND(1.0 * SUM(CASE WHEN b.is_on_time = 1 AND r.has_repeat = 0 THEN 1 ELSE 0 END) / COUNT(*), 3) AS true_on_time_rate,
+           ROUND(100.0 * SUM(CASE WHEN b.is_on_time = 1 AND r.has_repeat = 1 THEN 1 ELSE 0 END) / COUNT(*), 1) AS drop_points
+    FROM base b
+    JOIN repeats r ON r.request_id = b.request_id
+    JOIN tenants t ON t.tenant_id = b.tenant_id
+    GROUP BY t.tenant_code
+    ORDER BY drop_points DESC, t.tenant_code
+    LIMIT 5
+  match:
+    labels:
+    - tenant_code
+    values:
+    - reported_on_time_rate
+    - true_on_time_rate
+    top: 5
+  metrics:
+  - true_on_time_rate
+
+- id: H08-council-complaint-30d-phrases
+  source: colleague q8. Thirty days, and only the two phrases the question names.
+  questions:
+  - 'For requests filed from June 2025 through April 2026, what percentage led to a council complaint within 30 days when the resident wrote "third time" or "fed up," compared with requests containing neither phrase?'
+  reference_sql: |
+    WITH labeled AS (
+      SELECT sr.request_id, sr.created_at,
+             CASE WHEN LOWER(rd.description_text) LIKE '%third time%'
+                    OR LOWER(rd.description_text) LIKE '%fed up%'
+                  THEN 1 ELSE 0 END AS has_phrase
+      FROM service_requests sr
+      JOIN request_descriptions rd ON rd.request_id = sr.request_id
+      WHERE sr.created_at >= '2025-06-01' AND sr.created_at < '2026-05-01'
+    ), escalated AS (
+      SELECT DISTINCT cc.primary_request_id AS request_id
+      FROM citizen_complaints cc
+      JOIN service_requests sr ON sr.request_id = cc.primary_request_id
+      WHERE cc.filed_at <= sr.created_at + INTERVAL '30 days'
+    )
+    SELECT l.has_phrase,
+           COUNT(*) AS requests,
+           COUNT(e.request_id) AS escalated,
+           ROUND(1.0 * COUNT(e.request_id) / COUNT(*), 4) AS council_escalation_rate
+    FROM labeled l
+    LEFT JOIN escalated e ON e.request_id = l.request_id
+    GROUP BY l.has_phrase
+    ORDER BY l.has_phrase
+  match:
+    values:
+    - council_escalation_rate
+  metrics:
+  - council_escalation_rate
