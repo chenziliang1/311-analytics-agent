@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 
 """
-The deployment, as four stacks.
+The deployment, as four stacks, plus the role GitHub Actions deploys them with.
 
     Secrets -> McpRuntime -> AgentRuntime -> Observability
+    GithubDeploy
 
 Skipped on purpose: the network stack (both runtimes run in AgentCore's PUBLIC
 network mode, so there is no VPC, NAT or endpoint to pay for while idle) and
@@ -240,3 +241,47 @@ class ObservabilityStack(Stack):
             alarm.add_alarm_action(cw_actions.SnsAction(self.topic))
 
         CfnOutput(self, "AlarmTopicArn", value=self.topic.topic_arn)
+
+
+#: CDK's default bootstrap qualifier: the roles `cdk bootstrap` created.
+CDK_QUALIFIER = "hnb659fds"
+
+
+class GithubDeployStack(Stack):
+    """
+    The role GitHub Actions deploys with, through OIDC: no AWS key is stored
+    in GitHub. Only workflow runs on the repository's main branch can assume
+    it, and all it may do is assume CDK's own bootstrap roles, which hold the
+    actual deploy permissions -- the same path a local `cdk deploy` takes.
+
+    The account already has the GitHub OIDC provider (one per account), so it
+    is referenced, not created.
+    """
+
+    def __init__(self, scope: Construct, id: str, *, repo: str, branch: str = "main", **kwargs):
+        super().__init__(scope, id, **kwargs)
+        provider_arn = f"arn:aws:iam::{self.account}:oidc-provider/token.actions.githubusercontent.com"
+        role = iam.Role(
+            self,
+            "DeployRole",
+            role_name="citypulse-github-deploy",
+            description=f"GitHub Actions deploys from {repo}@{branch}",
+            max_session_duration=Duration.hours(1),
+            assumed_by=iam.FederatedPrincipal(
+                provider_arn,
+                conditions={
+                    "StringEquals": {
+                        "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+                        "token.actions.githubusercontent.com:sub": f"repo:{repo}:ref:refs/heads/{branch}",
+                    }
+                },
+                assume_role_action="sts:AssumeRoleWithWebIdentity",
+            ),
+        )
+        role.add_to_policy(
+            iam.PolicyStatement(
+                actions=["sts:AssumeRole", "sts:TagSession"],
+                resources=[f"arn:aws:iam::{self.account}:role/cdk-{CDK_QUALIFIER}-*-{self.account}-{self.region}"],
+            )
+        )
+        CfnOutput(self, "DeployRoleArn", value=role.role_arn)

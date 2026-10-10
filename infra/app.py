@@ -10,7 +10,13 @@ import os
 
 import aws_cdk as cdk
 
-from citypulse_infra.stacks import AgentRuntimeStack, McpRuntimeStack, ObservabilityStack, SecretsStack
+from citypulse_infra.stacks import (
+    AgentRuntimeStack,
+    GithubDeployStack,
+    McpRuntimeStack,
+    ObservabilityStack,
+    SecretsStack,
+)
 
 app = cdk.App()
 env = cdk.Environment(
@@ -22,6 +28,7 @@ secrets = SecretsStack(app, "CityPulseSecrets", env=env)
 mcp = McpRuntimeStack(app, "CityPulseMcpRuntime", secrets=secrets, env=env)
 AgentRuntimeStack(app, "CityPulseAgentRuntime", secrets=secrets, mcp=mcp, env=env)
 ObservabilityStack(app, "CityPulseObservability", env=env)
+GithubDeployStack(app, "CityPulseGithubDeploy", repo="chenziliang1/311-analytics-agent", env=env)
 
 cdk.Tags.of(app).add("project", "citypulse-311-lens")
 app.synth()

@@ -24,6 +24,7 @@ from aws_cdk.assertions import Match, Template  # noqa: E402
 
 from citypulse_infra.stacks import (  # noqa: E402
     AgentRuntimeStack,
+    GithubDeployStack,
     McpRuntimeStack,
     ObservabilityStack,
     SecretsStack,
@@ -129,3 +130,42 @@ def test_dashboard_and_four_alarms(templates):
     body = json.dumps(templates["O"].to_json())
     for widget in ("1. Warehouse queries", "2. Tool error rate", "3. Latency", "4. Tokens", "5. Cold starts", "6. Questions per day"):
         assert widget in body
+
+
+def test_github_deploy_role_is_main_branch_only_and_can_only_hop_to_cdk_roles():
+    app = cdk.App()
+    stack = GithubDeployStack(
+        app, "G", repo="acme/widgets", env=cdk.Environment(account="111122223333", region="us-east-1")
+    )
+    t = Template.from_stack(stack)
+    t.has_resource_properties(
+        "AWS::IAM::Role",
+        {
+            "AssumeRolePolicyDocument": Match.object_like(
+                {
+                    "Statement": [
+                        Match.object_like(
+                            {
+                                "Action": "sts:AssumeRoleWithWebIdentity",
+                                "Condition": {
+                                    "StringEquals": {
+                                        "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+                                        "token.actions.githubusercontent.com:sub": "repo:acme/widgets:ref:refs/heads/main",
+                                    }
+                                },
+                            }
+                        )
+                    ]
+                }
+            )
+        },
+    )
+    body = json.dumps(t.to_json())
+    assert "cdk-hnb659fds-*-111122223333-us-east-1" in body
+    # Nothing but the hop to CDK's roles: no service permissions of its own.
+    policies = t.find_resources("AWS::IAM::Policy")
+    actions = {
+        a for p in policies.values() for st in p["Properties"]["PolicyDocument"]["Statement"]
+        for a in (st["Action"] if isinstance(st["Action"], list) else [st["Action"]])
+    }
+    assert actions == {"sts:AssumeRole", "sts:TagSession"}

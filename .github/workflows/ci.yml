@@ -1,29 +1,43 @@
-# Every push and pull request: the checks that need no credentials and cost
-# nothing. The golden-set eval is eval.yml.
+# Tests on every push and pull request; on main, a deploy once they pass.
+#
+#   python, web            no secrets, nothing deployed
+#   deploy-agentcore       when the backend changed: CDK deploys both AgentCore
+#                          runtimes, building the ARM64 image on an ARM runner
+#   deploy-web             when the web app changed, after the backend: Vercel
+#
+# "Run workflow" on main deploys both whatever changed. AWS is reached through
+# OIDC (the role in vars.AWS_DEPLOY_ROLE_ARN, see GithubDeployStack): no AWS key
+# is stored here. Vercel needs secrets.VERCEL_TOKEN; without it the web deploy
+# says so and is skipped.
 name: ci
 
 on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # A newer push replaces a pull request's run, never a deploy in progress.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
 
 jobs:
   python:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.0
         with:
           python-version: "3.12"
       - name: Install
         run: uv sync --locked --all-extras
       - name: Unit tests
-        run: .venv/bin/pytest tests_python -q
+        run: .venv/bin/pytest tests_python -q -rs
       # Prompts, semantic layer, golden set and kickstart questions against
       # the warehouse DDL; needs no database.
       - name: Content consistency
@@ -33,9 +47,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
           cache: pnpm
@@ -46,3 +60,116 @@ jobs:
       # The only check for site.toml keys and icon names.
       - name: Build
         run: pnpm exec next build
+
+  changes:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      web: ${{ steps.filter.outputs.web }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          filters: |
+            backend:
+              - "agent_app/**"
+              - "data/**"
+              - "infra/**"
+              - "pyproject.toml"
+              - "uv.lock"
+              - ".env.defaults"
+              - ".dockerignore"
+            web:
+              - "app/**"
+              - "components/**"
+              - "hooks/**"
+              - "lib/**"
+              - "proxy.ts"
+              - "api/**"
+              - "agent_app/**"
+              - "data/**"
+              - "package.json"
+              - "pnpm-lock.yaml"
+              - "next.config.js"
+              - "tailwind.config.ts"
+              - "postcss.config.mjs"
+              - "tsconfig.json"
+              - "vercel.json"
+              - ".vercelignore"
+              - "pyproject.toml"
+              - "uv.lock"
+              - ".env.defaults"
+
+  deploy-agentcore:
+    needs: [python, web, changes]
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.backend == 'true'
+    # The runtimes run ARM64 images: build them natively.
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    concurrency:
+      group: deploy-agentcore
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          python-version: "3.12"
+      - name: Install the CDK app
+        run: uv sync --locked --extra infra
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: us-east-1
+      - name: Deploy
+        working-directory: infra
+        run: npx --yes aws-cdk@2 deploy --all --require-approval never
+
+  deploy-web:
+    needs: [python, web, changes, deploy-agentcore]
+    # After the backend, so the web app never calls a runtime older than itself.
+    if: >-
+      always()
+      && needs.python.result == 'success'
+      && needs.web.result == 'success'
+      && (needs.deploy-agentcore.result == 'success' || needs.deploy-agentcore.result == 'skipped')
+      && (github.event_name == 'workflow_dispatch' || needs.changes.outputs.web == 'true')
+      && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: deploy-web
+      cancel-in-progress: false
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+    steps:
+      - name: Check the token is set
+        id: token
+        run: |
+          if [ -z "$VERCEL_TOKEN" ]; then
+            echo "::notice::VERCEL_TOKEN is not set; skipping the web deploy."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v7
+        if: steps.token.outputs.run == 'true'
+      - uses: actions/setup-node@v7
+        if: steps.token.outputs.run == 'true'
+        with:
+          node-version: "24"
+      # Vercel builds it, as `vercel deploy` from a laptop does.
+      - name: Deploy
+        if: steps.token.outputs.run == 'true'
+        run: npx --yes vercel@latest deploy --prod --yes --token "$VERCEL_TOKEN"
