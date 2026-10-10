@@ -3,6 +3,7 @@
 import { BookOpen, X } from "lucide-react";
 import { useState } from "react";
 
+import { splitCitationId } from "@/lib/chat/citations";
 import type { SiteConfig } from "@/lib/site/schema";
 
 /** What /api/source returns: the MCP server's read_source output. */
@@ -24,9 +25,7 @@ export function Citation({ id, chatId, site }: { id: string; chatId?: string; si
   const [open, setOpen] = useState(false);
   const [doc, setDoc] = useState<SourceDoc | null>(null);
   const [state, setState] = useState<"idle" | "loading" | "failed">("idle");
-  const slash = id.indexOf("/");
-  const kind = slash > 0 ? id.slice(0, slash) : "";
-  const key = slash > 0 ? id.slice(slash + 1) : id;
+  const { kind, key } = splitCitationId(id);
 
   const toggle = async () => {
     const next = !open;
