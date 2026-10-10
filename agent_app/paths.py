@@ -48,6 +48,11 @@ class PathEnum:
     # by ``agent_app.semantic_layer``; a swap replaces the whole directory.
     dir_semantic_layer = dir_data / "semantic_layer"
 
+    # The knowledge base index, generated from the semantic layer by
+    # `agent-app kb-index` and checked against it by the content check. Kept
+    # in the repository so a reader sees what the agent can cite.
+    path_llms_txt = dir_data / "llms.txt"
+
     # What the warehouse tool's own model is told before it writes SQL: the
     # domain and the dialect, without anything about talking to a user.
     path_sql_writer_prompt_md = dir_data / "sql-writer-prompt.md"

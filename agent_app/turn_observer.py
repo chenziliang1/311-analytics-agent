@@ -43,8 +43,9 @@ Listener = T.Callable[[dict], None]
 #: rows a chat bubble stops being readable.
 CSV_MIN_ROWS = 20
 
-#: The tools whose calls carry the asker's identity, for their audit logs.
-IDENTIFIED_TOOLS = frozenset({"warehouse_query"})
+#: The tools whose calls carry the asker's identity: for the audit log, and
+#: for the warehouse role their reads run as.
+IDENTIFIED_TOOLS = frozenset({"warehouse_query", "list_sources", "read_source"})
 
 #: Query statuses that mean the tool could not produce an answer.
 FAILED_STATUSES = frozenset({"sql_error", "timeout"})

@@ -343,6 +343,37 @@ def check_semantic_layer(report: Report, db_tables: set[str] | None) -> bool:
     return ok
 
 
+def check_knowledge_index(report: Report) -> bool:
+    """
+    Fail if data/llms.txt is not what the semantic layer generates.
+
+    The agent builds the index from the layer at run time, so the file can
+    only be wrong, never load-bearing; it is kept so a reader sees what the
+    agent can cite, and a stale one would show them definitions that no
+    longer exist. ``agent-app kb-index`` rewrites it.
+    """
+    from agent_app.knowledge import KnowledgeBase
+    from agent_app.semantic_layer.api import load_registry
+
+    ok = True
+    path = path_enum.path_llms_txt
+    try:
+        expected = KnowledgeBase(load_registry(path_enum.dir_semantic_layer)).index()
+    except Exception as e:
+        report.error("knowledge-index", str(e))
+        expected = None
+        ok = False
+    if expected is not None:
+        if not path.exists():
+            report.error("knowledge-index", f"missing: {path}; run `agent-app kb-index`")
+            ok = False
+        elif path.read_text(encoding="utf-8") != expected:
+            report.error("knowledge-index", f"{path} is stale; run `agent-app kb-index`")
+            ok = False
+    report.section("knowledge index", ok)
+    return ok
+
+
 def check_golden_cases(report: Report) -> bool:
     """
     Fail if data/eval/golden_cases.yml does not load.
@@ -456,6 +487,7 @@ def run(retired: list[str] | None = None) -> int:
 
     check_content_files(report)
     check_semantic_layer(report, db_tables or None)
+    check_knowledge_index(report)
     check_golden_cases(report)
     check_render_quota(report)
 

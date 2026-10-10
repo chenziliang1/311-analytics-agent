@@ -52,6 +52,7 @@ class FakePaths:
         self.path_site_toml = root / "data" / "site.toml"
         self.path_business_context_md = root / "data" / "business-context.md"
         self.dir_semantic_layer = root / "data" / "semantic_layer"
+        self.path_llms_txt = root / "data" / "llms.txt"
         self.path_sql_writer_prompt_md = root / "data" / "sql-writer-prompt.md"
         self.path_golden_cases_yml = root / "data" / "eval" / "golden_cases.yml"
         self.path_warehouse_ddl_sql = root / "infra" / "snowflake" / "ddl.sql"
@@ -93,6 +94,13 @@ def use_tmp_repo(monkeypatch, tmp_path, prompt="", site="", context="", ddl=WIDG
     (tmp_path / "data" / "semantic_layer" / "metrics" / "widget_count.yml").write_text(
         WIDGET_METRIC_YML, encoding="utf-8"
     )
+    # The index as the layer generates it, so a fake repo starts in sync.
+    from agent_app.knowledge import KnowledgeBase
+    from agent_app.semantic_layer.api import load_registry
+
+    (tmp_path / "data" / "llms.txt").write_text(
+        KnowledgeBase(load_registry(tmp_path / "data" / "semantic_layer")).index(), encoding="utf-8"
+    )
     (tmp_path / "data" / "system-prompt.md").write_text(prompt, encoding="utf-8")
     (tmp_path / "data" / "sql-writer-prompt.md").write_text(prompt, encoding="utf-8")
     (tmp_path / "data" / "eval").mkdir(exist_ok=True)
@@ -105,6 +113,27 @@ def use_tmp_repo(monkeypatch, tmp_path, prompt="", site="", context="", ddl=WIDG
     (tmp_path / "data" / "business-context.md").write_text(context, encoding="utf-8")
     monkeypatch.setattr(cc, "path_enum", FakePaths(tmp_path))
     return tmp_path
+
+
+class TestCheckKnowledgeIndex:
+    def test_in_sync_passes(self, monkeypatch, tmp_path):
+        use_tmp_repo(monkeypatch, tmp_path)
+        report = cc.Report()
+        assert cc.check_knowledge_index(report) and report.errors == []
+
+    def test_stale_index_fails_and_says_how_to_fix_it(self, monkeypatch, tmp_path):
+        use_tmp_repo(monkeypatch, tmp_path)
+        (tmp_path / "data" / "llms.txt").write_text("# old\n", encoding="utf-8")
+        report = cc.Report()
+        assert not cc.check_knowledge_index(report)
+        assert "stale" in report.errors[0] and "kb-index" in report.errors[0]
+
+    def test_missing_index_fails(self, monkeypatch, tmp_path):
+        use_tmp_repo(monkeypatch, tmp_path)
+        (tmp_path / "data" / "llms.txt").unlink()
+        report = cc.Report()
+        assert not cc.check_knowledge_index(report)
+        assert "missing" in report.errors[0]
 
 
 class TestCheckSemanticLayer:

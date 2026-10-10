@@ -64,6 +64,22 @@ class Cli:
 
         raise SystemExit(run(retired=_as_word_list(retired)))
 
+    def kb_index(self) -> None:
+        """
+        Write data/llms.txt, the knowledge base index, from the semantic layer.
+
+        The agent builds the same index at run time; the file is for readers
+        of the repository, and `check-content` fails when it has drifted from
+        the definitions.
+        """
+        from agent_app.knowledge import KnowledgeBase
+        from agent_app.paths import path_enum
+        from agent_app.semantic_layer.api import load_registry
+
+        index = KnowledgeBase(load_registry(path_enum.dir_semantic_layer)).index()
+        path_enum.path_llms_txt.write_text(index, encoding="utf-8")
+        print(f"Wrote {path_enum.path_llms_txt} ({index.count(chr(10))} lines)")
+
     def test_db_conn(self) -> None:
         """
         Prove this machine can reach the cloud PostgreSQL, and nothing else.
@@ -171,12 +187,17 @@ class Cli:
             mark += {True: "A", False: "a", None: "?"}[score.answer_ok]
             print(f"  {mark}  {score.case_id:28s} {score.seconds:5.1f}s", flush=True)
 
+        from agent_app.knowledge import KnowledgeBase
+        from agent_app.semantic_layer.api import load_registry
+
         scores = run_all(
             selected,
             chat=live.app_chat(),
             reference=live.db_reference(),
             judge=live.model_judge() if judge else None,
             on_score=progress,
+            # A citation of a document that does not exist scores as none.
+            knows=KnowledgeBase(load_registry(path_enum.dir_semantic_layer)).knows,
         )
         summary = summarize(scores)
         summary["config"] = {

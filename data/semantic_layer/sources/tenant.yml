@@ -1,0 +1,25 @@
+name: tenant
+display_name: Tenant profile
+description: >-
+  One customer city or county: where it is, its population and size tier, how far
+  its local wording drifts from what the classifier was trained on, when it
+  launched, and its current monthly health snapshot (the numbers the customer was
+  shown). Read it before describing a tenant's situation.
+# Rows come back through the row access policy: a restricted role lists and
+# reads its own tenant only.
+list_sql: |
+  SELECT t.tenant_code AS key, t.tenant_name AS title
+  FROM tenants t
+  ORDER BY t.tenant_code
+# "Current" health is the last fully settled snapshot month, as the glossary's
+# health snapshot term defines it, not MAX(snapshot_month).
+read_sql: |
+  SELECT t.tenant_code, t.tenant_name, t.state_or_province, t.country, t.population,
+         t.size_tier, t.vocab_drift_level, t.has_french_vocab, t.launched_on,
+         h.snapshot_month, h.request_count, h.sla_breach_rate, h.reopen_rate,
+         h.repeat_at_address_rate, h.classifier_accuracy, h.council_escalation_rate,
+         h.nps_score, h.churn_risk_band
+  FROM tenants t
+  LEFT JOIN tenant_health_snapshots h
+    ON h.tenant_id = t.tenant_id AND h.snapshot_month = '2026-03-01'
+  WHERE t.tenant_code = :key

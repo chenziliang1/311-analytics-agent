@@ -9,6 +9,7 @@ from .model import Metric
 from .model import Dimension
 from .model import TimeWindow
 from .model import GlossaryTerm
+from .model import EntitySource
 from .registry import Match
 from .registry import SemanticRegistry
 from .registry import load_registry
@@ -26,6 +27,7 @@ __all__ = [
     "Dimension",
     "TimeWindow",
     "GlossaryTerm",
+    "EntitySource",
     "Match",
     "SemanticRegistry",
     "load_registry",
