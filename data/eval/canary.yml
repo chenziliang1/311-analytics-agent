@@ -1,0 +1,40 @@
+# The canary's questions (agent_app/canary.py): plain enough for the semantic
+# layer to compute the answer without a model, so the agent's figure can be
+# checked against one computed another way. A question with no dimension is
+# also checked against the frozen `replay` value in its metric's definition,
+# which catches the warehouse changing underneath the agent.
+#
+# Asked of the deployed agent every morning by .github/workflows/canary.yml;
+# `agent-app canary --target local` asks the same of a local agent.
+
+- id: C01-breach-rate
+  question: What is the SLA breach rate over the last 12 months?
+  metric: sla_breach_rate
+  time_window: trailing_12m
+
+- id: C02-breach-rate-by-size
+  question: What is the SLA breach rate by size tier over the last 12 months?
+  metric: sla_breach_rate
+  time_window: trailing_12m
+  dimension: size_tier
+
+- id: C03-request-volume
+  question: How many requests were created in the last 12 months?
+  metric: request_volume
+  time_window: trailing_12m
+
+- id: C04-reopen-rate
+  question: What is the reopen rate over the last 12 months?
+  metric: reopen_rate
+  time_window: trailing_12m
+
+- id: C05-accuracy-by-drift
+  question: Classifier accuracy by vocabulary drift level over the last 12 months?
+  metric: classifier_accuracy
+  time_window: trailing_12m
+  dimension: vocab_drift_level
+
+- id: C06-repeat-at-address
+  question: What is the repeat at address rate over the last 12 months?
+  metric: repeat_at_address_rate
+  time_window: trailing_12m

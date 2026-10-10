@@ -1,0 +1,103 @@
+# The morning canary: six plain questions to the deployed agent, each answer
+# checked against a figure the semantic layer computes on the warehouse
+# without a model (agent_app/canary.py). Catches the agent being confidently
+# wrong, which no latency or error alarm can see.
+#
+# Needs the deploy role (OIDC) for the agent runtime and CloudWatch, and the
+# Snowflake key for the reference figures. The model calls are the deployed
+# agent's own. On failure the CanaryFailures metric trips the dashboard's
+# alarm, and an issue carries the report.
+name: canary
+
+on:
+  schedule:
+    - cron: "0 12 * * *"  # 08:00 America/New_York in summer, 07:00 in winter
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "remote asks the deployed agent; local runs the agent in this job (needs ANTHROPIC_API_KEY)"
+        type: choice
+        options: [remote, local]
+        default: remote
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+concurrency:
+  group: canary
+  cancel-in-progress: false
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SNOWFLAKE_PRIVATE_KEY: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      METRICS_NAMESPACE: CityPulse
+      TARGET: ${{ inputs.target || 'remote' }}
+    steps:
+      - name: Check the secrets are set
+        id: secrets
+        run: |
+          if [ -z "$SNOWFLAKE_PRIVATE_KEY" ] || [ -z "${{ vars.AWS_DEPLOY_ROLE_ARN }}" ]; then
+            echo "::notice::SNOWFLAKE_PRIVATE_KEY or AWS_DEPLOY_ROLE_ARN is not set; skipping the canary."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v7
+        if: steps.secrets.outputs.run == 'true'
+      - uses: astral-sh/setup-uv@v10.3.0
+        if: steps.secrets.outputs.run == 'true'
+        with:
+          python-version: "3.12"
+      - name: Install
+        if: steps.secrets.outputs.run == 'true'
+        run: uv sync --locked
+      - uses: aws-actions/configure-aws-credentials@v6
+        if: steps.secrets.outputs.run == 'true'
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: us-east-1
+      - name: Find the deployed agent
+        if: steps.secrets.outputs.run == 'true'
+        run: |
+          arn=$(aws cloudformation describe-stacks --stack-name CityPulseAgentRuntime \
+            --query "Stacks[0].Outputs[?OutputKey=='AgentRuntimeArn'].OutputValue" --output text)
+          echo "AGENTCORE_RUNTIME_ARN=$arn" >> "$GITHUB_ENV"
+          echo "agent: $arn"
+      - name: Ask the canary questions
+        id: canary
+        if: steps.secrets.outputs.run == 'true'
+        run: |
+          set -o pipefail
+          .venv/bin/agent-app canary --target "$TARGET" --publish 2>&1 | tee canary.log
+      - name: Summary
+        if: always() && steps.secrets.outputs.run == 'true'
+        run: |
+          {
+            echo '## Canary'
+            echo '```'
+            sed -n '/canary questions, /,$p' canary.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Open or update the issue
+        if: failure() && steps.secrets.outputs.run == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          body="The canary of $(date -u +%Y-%m-%d) failed against the deployed agent ($TARGET). Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
+
+          \`\`\`
+          $(sed -n '/canary questions, /,$p' canary.log)
+          \`\`\`"
+          existing=$(gh issue list --label canary --state open --json number --jq '.[0].number')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh label create canary --description "The morning canary failed" --color D93F0B 2>/dev/null || true
+            gh issue create --title "Canary failed on $(date -u +%Y-%m-%d)" --label canary --body "$body"
+          fi

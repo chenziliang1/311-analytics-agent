@@ -130,6 +130,14 @@ class TestConfig:
         monkeypatch.setenv("TENANT_ROLE_TABLE", "")
         assert Config.new_from_env_var().tenant_role_table is None
 
+    def test_switch_table_must_be_a_table_name(self, monkeypatch):
+        assert Config(switch_table="CITYPULSE_AUDIT.SWITCHES").switch_table
+        assert Config().switch_ttl_seconds == 30.0
+        with pytest.raises(ValueError, match="SWITCH_TABLE"):
+            Config(switch_table="audit.switches; DROP TABLE x")
+        monkeypatch.setenv("SWITCH_TABLE", "")
+        assert Config.new_from_env_var().switch_table is None
+
     def test_tenant_map_is_read_from_the_environment(self, monkeypatch):
         monkeypatch.setenv("TENANT_ROLE_MAP", "ada=SHOP_PLANT_NORTH, bo=SHOP_RO")
         monkeypatch.setenv("TENANT_DEFAULT_ROLE", "")

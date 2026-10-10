@@ -21,6 +21,7 @@ from ..semantic_layer.api import Match, SemanticRegistry
 from ..semantic_layer.fast_path import plan_fast_path
 from ..sql_guard import guard_select
 from ..sql_utils import fetch_rows, role_statements
+from ..switches import NO_SWITCHES, Switches
 from ..tenant_access import TenantAccess
 from .models import CitedSource, WarehouseQueryOutput
 from .sql_writer import Writer, build_request, parse_reply
@@ -52,6 +53,9 @@ class WarehouseDeps:
     #: asking the writer (semantic_layer.fast_path). Off until the eval says
     #: the gate is right.
     fast_path: bool = False
+    #: The operator's switches as of now (agent_app.switches): a kill switch
+    #: and per-metric suspensions, checked before anything else happens.
+    switches: T.Callable[[], Switches] = lambda: NO_SWITCHES
 
 
 def _resolve(
@@ -172,6 +176,22 @@ def _run_compiled(
     )
 
 
+def switch_table_source(engine: sa.Engine, table: str) -> T.Callable[[], list[tuple]]:
+    """Reads ``(name, value, reason)`` rows from ``table`` for a SwitchReader, as the service role."""
+    from .. import sql_utils
+    from ..tenant_access import check_table_name
+
+    sql = f"SELECT name, value, reason FROM {check_table_name(table)}"
+
+    def read() -> list[tuple]:
+        result = sql_utils.fetch_rows(engine, sql, 1_000)
+        if result.error:
+            raise RuntimeError(f"switch table {table}: {result.error}")
+        return [tuple(row) for row in result.rows]
+
+    return read
+
+
 def run_as_for(deps: WarehouseDeps, user_id: str | None) -> tuple[dict, str | None]:
     """
     How ``user_id``'s reads run: ``fetch_rows`` keyword arguments, or why they
@@ -264,6 +284,24 @@ def answer(
             warning=f"Refused: {refused}.",
             semantic_layer_version=version,
         ))
+
+    switches = deps.switches()
+    if switches.killed:
+        return finish(WarehouseQueryOutput(
+            status="blocked",
+            warning=f"The warehouse tool is temporarily unavailable: {switches.killed}. Try again later.",
+            semantic_layer_version=version,
+        ))
+    for metric in match.metrics:
+        if metric.name in switches.suspended:
+            return finish(WarehouseQueryOutput(
+                status="blocked",
+                warning=(
+                    f"Questions about {metric.display_name} are suspended for now: "
+                    f"{switches.suspended[metric.name]}. Other metrics still work."
+                ),
+                semantic_layer_version=version,
+            ))
 
     if deps.fast_path:
         compiled = _run_compiled(deps, intent, match, run_as, version, sources)

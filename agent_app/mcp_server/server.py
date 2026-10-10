@@ -32,6 +32,7 @@ from .models import (
 )
 from .visualize import build_chart
 from .warehouse import WarehouseDeps, answer
+from ..switches import NO_SWITCHES
 
 INSTRUCTIONS = """\
 Read-only analytics over a 311 service request warehouse for 120 North American
@@ -113,9 +114,23 @@ def _build_default_deps() -> WarehouseDeps:  # pragma: no cover - needs a databa
             ),
         )
 
+    switches = lambda: NO_SWITCHES  # noqa: E731
+    if one.config.switch_table:
+        import sys
+
+        from ..switches import SwitchReader
+        from .warehouse import switch_table_source
+
+        switches = SwitchReader(
+            switch_table_source(one.engine, one.config.switch_table),
+            ttl_seconds=one.config.switch_ttl_seconds,
+            on_error=lambda e: print(f"[Switches] read failed: {e}", file=sys.stderr),
+        )
+
     return WarehouseDeps(
         engine=one.engine,
         registry=load_registry(path_enum.dir_semantic_layer),
+        switches=switches,
         # In the writer's cached system prompt instead, below.
         schema="",
         allowed_tables=allowed,

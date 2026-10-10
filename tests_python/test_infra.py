@@ -124,12 +124,16 @@ def test_vercelignore_is_an_allow_list_without_secrets_or_the_seed():
     assert not allowed & {".env", "dataset", "infra", "tmp"}
 
 
-def test_dashboard_and_four_alarms(templates):
+def test_dashboard_and_five_alarms(templates):
     templates["O"].resource_count_is("AWS::CloudWatch::Dashboard", 1)
-    templates["O"].resource_count_is("AWS::CloudWatch::Alarm", 4)
+    templates["O"].resource_count_is("AWS::CloudWatch::Alarm", 5)
     body = json.dumps(templates["O"].to_json())
-    for widget in ("1. Warehouse queries", "2. Tool error rate", "3. Latency", "4. Tokens", "5. Cold starts", "6. Questions per day"):
+    for widget in ("1. Warehouse queries", "2. Tool error rate", "3. Latency", "4. Tokens", "5. Cold starts", "6. Questions per day", "7. Canary"):
         assert widget in body
+    # The one alarm about being wrong: a single canary failure in a day trips it.
+    templates["O"].has_resource_properties("AWS::CloudWatch::Alarm", Match.object_like({
+        "MetricName": "CanaryFailures", "Threshold": 1, "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+    }))
 
 
 def test_github_deploy_role_is_main_branch_only_and_can_only_hop_to_cdk_roles():
@@ -165,10 +169,20 @@ def test_github_deploy_role_is_main_branch_only_and_can_only_hop_to_cdk_roles():
     )
     body = json.dumps(t.to_json())
     assert "cdk-hnb659fds-*-111122223333-us-east-1" in body
-    # Nothing but the hop to CDK's roles: no service permissions of its own.
+    # The hop to CDK's roles, plus exactly what the canary needs: ask the one
+    # agent, find it, report one metric. Nothing else.
     policies = t.find_resources("AWS::IAM::Policy")
+    statements = [st for p in policies.values() for st in p["Properties"]["PolicyDocument"]["Statement"]]
     actions = {
-        a for p in policies.values() for st in p["Properties"]["PolicyDocument"]["Statement"]
-        for a in (st["Action"] if isinstance(st["Action"], list) else [st["Action"]])
+        a for st in statements for a in (st["Action"] if isinstance(st["Action"], list) else [st["Action"]])
     }
-    assert actions == {"sts:AssumeRole", "sts:TagSession"}
+    assert actions == {
+        "sts:AssumeRole", "sts:TagSession",
+        "bedrock-agentcore:InvokeAgentRuntime", "cloudformation:DescribeStacks", "cloudwatch:PutMetricData",
+    }
+    by_sid = {st.get("Sid"): st for st in statements}
+    assert by_sid["CanaryAsksTheAgent"]["Resource"] == [
+        "arn:aws:bedrock-agentcore:us-east-1:111122223333:runtime/citypulse_agent*"
+    ] or by_sid["CanaryAsksTheAgent"]["Resource"] == "arn:aws:bedrock-agentcore:us-east-1:111122223333:runtime/citypulse_agent*"
+    assert by_sid["CanaryReportsToTheDashboard"]["Condition"] == {"StringEquals": {"cloudwatch:namespace": "CityPulse"}}
+    assert "bedrock:InvokeModel" not in body
