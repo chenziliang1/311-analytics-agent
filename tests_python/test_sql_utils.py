@@ -20,9 +20,66 @@ from agent_app.sql_utils import (
     format_result,
     ensure_valid_select_query,
     execute_sql_query,
+    fetch_rows,
+    role_statements,
 )
 
 import pytest
+
+
+class TestRunAsRole:
+    def test_snowflake_switches_and_restores(self):
+        assert role_statements("snowflake", "SHOP_PLANT_NORTH", "SHOP_RO") == (
+            ["USE ROLE SHOP_PLANT_NORTH"], ["USE ROLE SHOP_RO"]
+        )
+
+    def test_snowflake_without_a_role_to_restore_has_nothing_to_run_after(self):
+        """The connection is discarded instead (fetch_rows)."""
+        assert role_statements("snowflake", "SHOP_PLANT_NORTH", None) == (["USE ROLE SHOP_PLANT_NORTH"], [])
+
+    def test_postgres_scopes_the_transaction(self):
+        assert role_statements("postgresql", "shop_plant_north", "shop_ro") == (["SET LOCAL ROLE shop_plant_north"], [])
+
+    def test_a_warehouse_without_roles_cannot_run_scoped(self):
+        with pytest.raises(ValueError, match="no roles"):
+            role_statements("sqlite", "SHOP_PLANT_NORTH", None)
+
+    @pytest.mark.parametrize("role", ["A B", "SHOP_RO; DROP TABLE widget", ""])
+    def test_a_role_that_is_not_an_identifier_is_refused(self, role):
+        with pytest.raises(ValueError):
+            role_statements("snowflake", role, "SHOP_RO")
+
+    def test_fetch_rows_fails_closed_where_it_cannot_switch(self, engine):
+        """SQLite has no roles: a scoped query must not run unscoped."""
+        result = fetch_rows(engine, "SELECT COUNT(*) FROM widget", 10, role="SHOP_PLANT_NORTH")
+        assert result.rows == [] and "no roles" in result.error
+        assert fetch_rows(engine, "SELECT COUNT(*) FROM widget", 10).rows == [[2]]
+
+    def test_a_snowflake_connection_that_cannot_be_restored_is_discarded(self, monkeypatch):
+        """Pooled on a tenant's role, it would scope the next query wrongly."""
+        from agent_app import sql_utils
+
+        class FakeConn:
+            def __init__(self):
+                self.ran, self.invalidated = [], False
+
+            def exec_driver_sql(self, statement):
+                self.ran.append(statement)
+                if statement.startswith("USE ROLE SHOP_RO"):
+                    raise RuntimeError("session gone")
+
+            def invalidate(self):
+                self.invalidated = True
+
+        conn = FakeConn()
+        sql_utils._restore_role(conn, ["USE ROLE SHOP_RO"])
+        assert conn.invalidated
+        conn = FakeConn()
+        sql_utils._restore_role(conn, [])
+        assert conn.invalidated
+        conn = FakeConn()
+        sql_utils._restore_role(conn, ["USE ROLE SHOP_OTHER"])
+        assert conn.ran == ["USE ROLE SHOP_OTHER"] and not conn.invalidated
 
 
 @pytest.fixture

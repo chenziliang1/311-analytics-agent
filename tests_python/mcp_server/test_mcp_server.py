@@ -8,6 +8,7 @@ serves, so none of them turns into a lie after a swap.
 """
 
 import asyncio
+import dataclasses
 import json
 from pathlib import Path
 
@@ -479,3 +480,67 @@ def test_audit_records_who_asked(engine, registry):
     assert (log[0]["user_id"], log[0]["session_id"]) == ("octocat", "chat-9")
     answer(make_deps(engine, registry, ScriptedWriter(sql("SELECT 1 AS n")), log), "one")
     assert log[1]["user_id"] == "anonymous"
+    assert log[0]["query_role"] is None  # nothing configured: the connection's own role
+
+
+class TestTenantScope:
+    """The warehouse role each user's query runs as, with the switch itself scripted."""
+
+    @staticmethod
+    def scoped_deps(engine, registry, writer, log, **access):
+        from agent_app.tenant_access import TenantAccess
+
+        deps = make_deps(engine, registry, writer, log)
+        return dataclasses.replace(deps, tenant_access=TenantAccess(internal_role="SHOP_RO", **access))
+
+    @pytest.fixture
+    def fetches(self, monkeypatch):
+        """Record what fetch_rows is asked to run as, without a warehouse that has roles."""
+        from agent_app.mcp_server import warehouse
+        from agent_app.sql_utils import QueryRows
+
+        calls = []
+
+        def fake(engine, sql, max_rows, timeout_seconds=None, role=None, restore_role=None):
+            calls.append((role, restore_role))
+            return QueryRows(["n"], [[3]], False)
+
+        monkeypatch.setattr(warehouse, "fetch_rows", fake)
+        # SQLite has no roles; pretend the warehouse can switch (the real check
+        # has its own test below).
+        monkeypatch.setattr(warehouse, "role_statements", lambda dialect, role, restore_role: ([], []))
+        return calls
+
+    def test_a_mapped_user_runs_as_their_role_and_the_connection_is_restored(self, engine, registry, fetches):
+        log = []
+        deps = self.scoped_deps(engine, registry, ScriptedWriter(sql("SELECT COUNT(*) AS n FROM widget")), log,
+                                user_roles={"ada": "SHOP_PLANT_NORTH"})
+        out = answer(deps, "how many widgets", user_id="ada")
+        assert out.status == "ok" and out.rows == [[3]]
+        assert fetches == [("SHOP_PLANT_NORTH", "SHOP_RO")]
+        assert log[0]["query_role"] == "SHOP_PLANT_NORTH"
+
+    def test_an_internal_user_switches_nothing(self, engine, registry, fetches):
+        deps = self.scoped_deps(engine, registry, ScriptedWriter(sql("SELECT COUNT(*) AS n FROM widget")), [],
+                                user_roles={"bo": "SHOP_RO"})
+        answer(deps, "how many widgets", user_id="bo")
+        assert fetches == [(None, None)]
+
+    def test_an_unknown_user_is_refused_before_any_sql_is_written(self, engine, registry, fetches):
+        writer = ScriptedWriter(sql("SELECT COUNT(*) AS n FROM widget"))
+        log = []
+        deps = self.scoped_deps(engine, registry, writer, log, user_roles={"ada": "SHOP_PLANT_NORTH"})
+        out = answer(deps, "how many widgets", user_id="cy", session_id="chat-1")
+        assert out.status == "blocked" and "no tenant access" in out.warning and out.sql is None
+        assert writer.requests == [] and fetches == []
+        assert (log[0]["status"], log[0]["user_id"], log[0]["query_role"]) == ("blocked", "cy", None)
+        # Sign-in off, or a session with no user, is not an internal analyst either.
+        assert answer(deps, "how many widgets").status == "blocked"
+
+    def test_a_scoped_query_the_warehouse_cannot_switch_is_refused_before_the_writer(self, engine, registry):
+        """SQLite has no roles: refused, not run unscoped, and no SQL written for it."""
+        writer = ScriptedWriter(sql("SELECT COUNT(*) AS n FROM widget"))
+        deps = self.scoped_deps(engine, registry, writer, [], default_role="SHOP_GUEST")
+        out = answer(deps, "how many widgets", user_id="anyone")
+        assert out.status == "blocked" and out.rows == [] and "no roles" in out.warning
+        assert writer.requests == []

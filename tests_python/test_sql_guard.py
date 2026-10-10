@@ -32,6 +32,10 @@ def guard(sql, max_rows=5000):
         ("SELECT o.email FROM owner o", "every selected column"),
         ("SELEC id FRM widget", "could not be parsed"),
         ("SELECT SYSTEM$WAIT(10)", "system$wait"),
+        # A scoped session must not be able to talk itself back onto the
+        # cross-tenant role.
+        ("USE ROLE CITYPULSE_RO", "only SELECT"),
+        ("USE SECONDARY ROLES ALL", "could not be parsed"),
         ("SELECT GET_DDL('table', 'widget')", "get_ddl"),
         ("SELECT * FROM TABLE(RESULT_SCAN(LAST_QUERY_ID()))", "not allowed"),
     ],

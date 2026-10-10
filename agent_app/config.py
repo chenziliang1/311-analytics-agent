@@ -19,6 +19,7 @@ import dataclasses
 from .paths import path_enum
 from .runtime import runtime
 from .constants import LlmProviderEnum, DEFAULT_MODEL_ID
+from .tenant_access import parse_role_map
 
 
 #: The placeholder ``.env.example`` uses for values the reader has to fill in.
@@ -251,6 +252,14 @@ class Config:
     #: from Secrets Manager. Locally, snowflake_private_key_path is simpler.
     snowflake_private_key: str | None = dataclasses.field(default=None)
     snowflake_private_key_path: str | None = dataclasses.field(default=None)
+    #: Per-user tenant scope: sign-in login -> the warehouse role that user's
+    #: queries run as, so the row access policy sees their tenant's role and
+    #: not the service connection's cross-tenant one. Empty, with no default
+    #: role: every user is internal and nothing is switched. See tenant_access.
+    tenant_role_map: dict[str, str] = dataclasses.field(default_factory=dict)
+    #: The role for a signed-in user the map does not name. None refuses
+    #: their queries once a map is set: an unknown user is not an internal one.
+    tenant_default_role: str | None = dataclasses.field(default=None)
     # --- Database ---
     db_host: str | None = dataclasses.field(default=None)
     db_port: int | None = dataclasses.field(default=None)
@@ -287,6 +296,14 @@ class Config:
                 "Point it at a DynamoDB table whose partition key is `app_id` (S), "
                 "or turn the cap off in .env.defaults."
             )
+        from .tenant_access import check_role_name
+
+        self.tenant_role_map = {
+            login: check_role_name(role, "TENANT_ROLE_MAP role")
+            for login, role in (self.tenant_role_map or {}).items()
+        }
+        if self.tenant_default_role is not None:
+            check_role_name(self.tenant_default_role, "TENANT_DEFAULT_ROLE")
         self.warehouse = (self.warehouse or "postgres").strip().lower()
         if self.warehouse not in ("postgres", "snowflake"):
             raise ValueError(
@@ -340,6 +357,17 @@ class Config:
             model_family(self.llm_provider, self.model_id),
             model_family(self.sql_writer_provider, self.sql_writer_model_id),
         }
+
+    @property
+    def tenant_access(self):
+        """Who runs as which warehouse role; see :mod:`agent_app.tenant_access`."""
+        from .tenant_access import TenantAccess
+
+        return TenantAccess(
+            internal_role=self.snowflake_role if self.warehouse == "snowflake" else None,
+            user_roles=dict(self.tenant_role_map),
+            default_role=self.tenant_default_role,
+        )
 
     @property
     def judge_is_self_graded(self) -> bool:
@@ -425,6 +453,8 @@ class Config:
             snowflake_schema=get_env("SNOWFLAKE_SCHEMA"),
             snowflake_private_key=get_env("SNOWFLAKE_PRIVATE_KEY"),
             snowflake_private_key_path=get_env("SNOWFLAKE_PRIVATE_KEY_PATH"),
+            tenant_role_map=parse_role_map(get_env("TENANT_ROLE_MAP")),
+            tenant_default_role=get_env("TENANT_DEFAULT_ROLE") or None,
             db_host=get_env("DB_HOST"),
             db_port=get_env_int("DB_PORT"),
             db_user=get_env("DB_USER"),

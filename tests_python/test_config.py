@@ -95,6 +95,34 @@ class TestConfig:
         assert config.eval_judge_provider == "bedrock"
         assert config.judge_is_self_graded
 
+    def test_tenant_access_off_by_default(self):
+        access = Config(warehouse="snowflake", snowflake_role="SHOP_RO").tenant_access
+        assert not access.enabled and access.internal_role == "SHOP_RO"
+        assert Config().tenant_access.internal_role is None  # postgres: no role in the connection
+
+    def test_tenant_access_from_the_map(self):
+        config = Config(
+            warehouse="snowflake", snowflake_role="SHOP_RO",
+            tenant_role_map={"ada": "SHOP_PLANT_NORTH"}, tenant_default_role="SHOP_GUEST",
+        )
+        access = config.tenant_access
+        assert access.enabled
+        assert access.role_for("ada").role == "SHOP_PLANT_NORTH"
+        assert access.role_for("cy").role == "SHOP_GUEST"
+
+    def test_tenant_roles_must_be_identifiers(self):
+        with pytest.raises(ValueError, match="TENANT_ROLE_MAP"):
+            Config(tenant_role_map={"ada": "SHOP RO"})
+        with pytest.raises(ValueError, match="TENANT_DEFAULT_ROLE"):
+            Config(tenant_default_role="SHOP_RO; DROP")
+
+    def test_tenant_map_is_read_from_the_environment(self, monkeypatch):
+        monkeypatch.setenv("TENANT_ROLE_MAP", "ada=SHOP_PLANT_NORTH, bo=SHOP_RO")
+        monkeypatch.setenv("TENANT_DEFAULT_ROLE", "")
+        config = Config.new_from_env_var()
+        assert config.tenant_role_map == {"ada": "SHOP_PLANT_NORTH", "bo": "SHOP_RO"}
+        assert config.tenant_default_role is None
+
     def test_unknown_sql_writer_provider(self):
         with pytest.raises(ValueError, match="SQL_WRITER_PROVIDER"):
             Config(sql_writer_provider="llama")
