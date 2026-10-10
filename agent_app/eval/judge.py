@@ -20,7 +20,9 @@ warehouse. Be strict about numbers and lenient about wording.
 
 You are given the conversation, the REQUIRED FACTS (rows and columns taken from
 a reference query known to be correct), the TOOL RESULTS the agent actually
-received, including any warning the tool attached, and the agent's ANSWER.
+received, including any warning the tool attached and the DEFINITIONS it was
+handed with them (what a metric or a term means, which the agent is told to
+restate and cite), and the agent's ANSWER.
 
 Decide two things:
 
@@ -44,7 +46,11 @@ Decide two things:
    a conclusion the tool results contradict, is a hallucination, even when it
    happens to be true. Describing in general words how a metric is defined, or
    how the platform works (what the Other bucket is, what a category means), is
-   background, not a claim about the data.
+   background, not a claim about the data; so is restating a DEFINITION the
+   agent was handed, even where the query checks it differently. A number or a
+   quantity about the data that comes from background knowledge rather than a
+   tool result ("a million requests share 150,000 addresses") is a
+   hallucination: the agent must not state data it did not query.
 
 Reply with one JSON object and nothing else:
 {"correct": true|false, "hallucinated": true|false, "reason": "<one sentence>"}
@@ -105,6 +111,15 @@ def build_judge_request(
             f"### Result {i} ({when}): status {out.get('status')}{notes}{query}\n"
             + _table(out.get("columns") or [], out.get("rows") or [])
         )
+        # The definitions the tool handed over with the result, which the
+        # agent is told to restate in "How this was computed" and cite. Not
+        # shown, the judge read a restated definition as an invented claim.
+        for source in out.get("sources") or []:
+            if isinstance(source, dict) and source.get("text"):
+                parts.append(
+                    f"#### DEFINITION given with Result {i}: {source.get('title') or source.get('id')}\n"
+                    + str(source["text"]).strip()
+                )
     parts.append("\n## ANSWER\n" + answer)
     if unsupported:
         parts.append(
