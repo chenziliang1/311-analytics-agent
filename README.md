@@ -4,7 +4,7 @@
 
 311 Analytics Agent is a BI agent that answers natural-language questions about 311 service requests, backed by a Snowflake warehouse. It is built for the people who run 311 operations and the analysts who support them. Instead of writing SQL, they ask in plain English, such as "Which cities breached SLA most often last month?", and get an answer in seconds: a table or chart where it helps, plus a short note on exactly how each number was computed. The warehouse holds 23 tables and about 11 million rows of synthetic data covering 120 North American cities and counties.
 
-Live demo: https://citypulse-311-lens.vercel.app (GitHub sign-in)
+Live demo: https://citypulse-311-lens.vercel.app (no sign-in needed)
 
 ## Run it
 
@@ -27,7 +27,7 @@ Once deployed, two things watch it. A **canary** ([`data/eval/canary.yml`](data/
 Browser (Next.js on Vercel) -> agent runtime (AgentCore) -> MCP tools runtime (AgentCore) -> Snowflake
 ```
 
-- **Chat UI:** Next.js on Vercel. GitHub sign-in, live progress while a turn runs, CSV download for long results, and thumbs up or down on every answer.
+- **Chat UI:** Next.js on Vercel. Open to anyone, with optional GitHub sign-in; live progress while a turn runs, CSV download for long results, and thumbs up or down on every answer. Because the chat needs no sign-in, the bill is bounded twice, in DynamoDB counters: a monthly cap for the whole demo and a daily cap per network address.
 - **Agent:** Strands Agents with Claude Sonnet on AWS Bedrock AgentCore. It interprets the question and words the answer.
 - **Tools:** a separate MCP server, also on AgentCore. `warehouse_query` goes from semantic layer to SQL writer to guard to Snowflake to audit log.
 - **Infrastructure:** AWS CDK, Secrets Manager, and a CloudWatch dashboard with alarms.

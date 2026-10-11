@@ -74,7 +74,7 @@ function withoutDataParts(messages: LensUIMessage[]): LensUIMessage[] {
   }));
 }
 
-export function Chat({ site }: { site: SiteConfig }) {
+export function Chat({ site, signIn = false }: { site: SiteConfig; signIn?: boolean }) {
   const [input, setInput] = useState("");
   const [isContextBannerVisible, setIsContextBannerVisible] = useState(true);
   const [session, setSession] = useState<StoredChat>(() => ({ id: newChatId(), messages: [] }));
@@ -252,10 +252,10 @@ export function Chat({ site }: { site: SiteConfig }) {
 
   return (
     <div className="flex flex-col min-w-0 h-[calc(100dvh-64px)] bg-background">
-      {(messages.length > 0 || userName) && (
+      {(messages.length > 0 || userName || signIn) && (
         <div className="shrink-0 border-b border-border bg-surface px-4 py-2">
           <div className="max-w-3xl mx-auto flex items-center justify-end gap-3">
-            {userName && (
+            {userName ? (
               <span className="text-xs text-muted-foreground truncate">
                 {site.chat.messages.signedInAs.replace("{name}", userName)}
                 {" · "}
@@ -263,6 +263,15 @@ export function Chat({ site }: { site: SiteConfig }) {
                   {site.chat.messages.signOut}
                 </a>
               </span>
+            ) : (
+              signIn && (
+                <a
+                  href="/auth/signin?callbackUrl=/chat"
+                  className="text-xs font-semibold text-primary hover:underline truncate"
+                >
+                  {site.chat.messages.signIn}
+                </a>
+              )
             )}
             {messages.length > 0 && (
               <button

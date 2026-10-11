@@ -19,6 +19,9 @@ logoAccent = "lens"
 
 footerName = "CityPulse311Lens"
 
+# Linked from the top bar on every page, with the GitHub mark.
+repoUrl = "https://github.com/chenziliang1/311-analytics-agent"
+
 
 # === <head> ================================================================
 [seo]
@@ -137,6 +140,8 @@ newChat = "New chat"
 # Next to "New chat" when sign-in is on. {name} is the GitHub login or name.
 signedInAs = "Signed in as {name}"
 signOut = "Sign out"
+# Sign-in is optional: a visitor who skips it chats as anonymous.
+signIn = "Sign in with GitHub"
 # The thumbs under each answer. A thumbs-down asks for an optional comment;
 # both are stored for review and can become a golden test case.
 feedbackHelpful = "Helpful"

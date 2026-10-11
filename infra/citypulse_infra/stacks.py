@@ -15,6 +15,7 @@ reached over the Anthropic API, so no role has bedrock:InvokeModel.
 from aws_cdk import CfnOutput, Duration, RemovalPolicy, SecretValue, Stack
 from aws_cdk import aws_cloudwatch as cw
 from aws_cdk import aws_cloudwatch_actions as cw_actions
+from aws_cdk import aws_dynamodb as dynamodb
 from aws_cdk import aws_iam as iam
 from aws_cdk import aws_secretsmanager as secretsmanager
 from aws_cdk import aws_sns as sns
@@ -26,6 +27,10 @@ from .runtime import METRICS_NAMESPACE, AgentCoreRuntime, agent_image
 #: `agent-app push-secrets`, never written here: CDK only creates the shape.
 LLM_SECRET_KEYS = ["ANTHROPIC_API_KEY"]
 DB_SECRET_KEYS = ["DB_HOST", "DB_PORT", "DB_USER", "DB_PASS", "DB_NAME"]
+
+#: The spend counters' table. The same string is DYNAMODB_TABLE_NAME_QUOTA in
+#: .env.defaults; a test holds the two together.
+QUOTA_TABLE_NAME = "citypulse-quota"
 
 #: Claude Sonnet list price per million tokens, for the cost estimate on
 #: the dashboard. An estimate, not the bill: update it with the price.
@@ -98,17 +103,38 @@ class AgentRuntimeStack(Stack):
             resources=[mcp_arn, f"{mcp_arn}/*"],
         ))
 
+        # The spend counters (agent_app/quota.py): one row per month for the
+        # whole demo, one row per network address and day because the chat
+        # needs no sign-in. The daily rows carry a `ttl` and expire on their
+        # own. Named, so DYNAMODB_TABLE_NAME_QUOTA in .env.defaults can be a
+        # plain string rather than a stack output.
+        self.quota = dynamodb.Table(
+            self,
+            "Quota",
+            table_name=QUOTA_TABLE_NAME,
+            partition_key=dynamodb.Attribute(name="app_id", type=dynamodb.AttributeType.STRING),
+            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+            time_to_live_attribute="ttl",
+            removal_policy=RemovalPolicy.DESTROY,
+        )
+
         # Vercel has no IAM role, so the web app signs with this user's keys.
-        # It can do exactly one thing: invoke this agent. Create its access key
-        # by hand; a key minted here would sit in the CloudFormation template.
+        # It can do exactly two things: invoke this agent, and keep the
+        # counters. Create its access key by hand; a key minted here would sit
+        # in the CloudFormation template.
         self.web_invoker = iam.User(self, "WebInvoker", user_name="citypulse-web-invoker")
         self.web_invoker.add_to_policy(iam.PolicyStatement(
             actions=["bedrock-agentcore:InvokeAgentRuntime"],
             resources=[self.agent.arn, f"{self.agent.arn}/*"],
         ))
+        self.web_invoker.add_to_policy(iam.PolicyStatement(
+            actions=["dynamodb:GetItem", "dynamodb:UpdateItem"],
+            resources=[self.quota.table_arn],
+        ))
 
         CfnOutput(self, "AgentRuntimeArn", value=self.agent.arn)
         CfnOutput(self, "WebInvokerUser", value=self.web_invoker.user_name)
+        CfnOutput(self, "QuotaTable", value=self.quota.table_name)
 
 
 def _metric(name: str, component: str, stat: str = "Sum", period: Duration = Duration.minutes(5), **dims):

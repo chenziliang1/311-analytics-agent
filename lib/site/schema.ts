@@ -62,6 +62,8 @@ export interface SiteConfig {
     logoPrefix: string
     logoAccent: string
     footerName: string
+    /** The source repository, linked from the top bar on every page. */
+    repoUrl: string
   }
   seo: {
     locale: string
@@ -109,6 +111,8 @@ export interface SiteConfig {
       /** `{name}` becomes the signed-in user. Shown only when sign-in is on. */
       signedInAs: string
       signOut: string
+      /** Offered to a visitor who has not signed in, when sign-in is on. */
+      signIn: string
       /** The thumbs under an answer, and what they say after a vote. */
       feedbackHelpful: string
       feedbackNotHelpful: string
@@ -154,6 +158,7 @@ export const REQUIRED_SITE_KEYS: readonly string[] = [
   "brand.logoPrefix",
   "brand.logoAccent",
   "brand.footerName",
+  "brand.repoUrl",
   "seo.locale",
   "seo.title",
   "seo.description",
@@ -187,6 +192,7 @@ export const REQUIRED_SITE_KEYS: readonly string[] = [
   "chat.messages.newChat",
   "chat.messages.signedInAs",
   "chat.messages.signOut",
+  "chat.messages.signIn",
   "chat.messages.feedbackHelpful",
   "chat.messages.feedbackNotHelpful",
   "chat.messages.feedbackCommentPlaceholder",

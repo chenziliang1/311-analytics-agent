@@ -1,15 +1,31 @@
-import { NextResponse } from "next/server"
+import { NextResponse, type NextRequest } from "next/server"
 
-import { auth, authEnabled } from "@/lib/auth"
+import { auth, authEnabled, signInRequired } from "@/lib/auth"
+
+/** Who the backend takes the request to be from. Only this file may set it. */
+const USER_HEADER = "x-lens-user"
 
 /**
- * The sign-in gate: every page and every /api call needs a session, when
- * sign-in is configured (lib/auth.ts). It runs before the /api rewrite, so
- * the FastAPI backend is behind it too, and it passes the signed-in login on
- * as `x-lens-user`, overwriting whatever the browser sent under that name.
+ * The request as the backend should see it: `x-lens-user` is the signed-in
+ * login, or absent. Whatever the browser sent under that name is dropped
+ * first, since the backend trusts the header and anyone can type one.
+ */
+function identified(request: NextRequest, login: string | null) {
+  const headers = new Headers(request.headers)
+  headers.delete(USER_HEADER)
+  if (login) headers.set(USER_HEADER, login)
+  return NextResponse.next({ request: { headers } })
+}
+
+/**
+ * With sign-in configured (lib/auth.ts): read the session and name the user
+ * to the backend. It runs before the /api rewrite, so the FastAPI backend is
+ * behind it too. A visitor without a session goes through as anonymous,
+ * unless `AUTH_REQUIRE_SIGN_IN` turns the site into a gate again.
  */
 const gate = auth((request) => {
-  if (!request.auth?.user) {
+  const user = request.auth?.user as { login?: string; name?: string | null } | undefined
+  if (!user && signInRequired) {
     if (request.nextUrl.pathname.startsWith("/api/")) {
       return NextResponse.json({ error: "sign in first" }, { status: 401 })
     }
@@ -17,13 +33,13 @@ const gate = auth((request) => {
     signIn.searchParams.set("callbackUrl", request.nextUrl.href)
     return NextResponse.redirect(signIn)
   }
-  const user = request.auth.user as { login?: string; name?: string | null }
-  const headers = new Headers(request.headers)
-  headers.set("x-lens-user", user.login ?? user.name ?? "")
-  return NextResponse.next({ request: { headers } })
+  return identified(request, user ? (user.login ?? user.name ?? "") : null)
 })
 
-export default authEnabled ? gate : () => NextResponse.next()
+/** Without sign-in there is no session to read, but the header is still not the browser's to set. */
+const open = (request: NextRequest) => identified(request, null)
+
+export default authEnabled ? gate : open
 
 export const config = {
   // Everything except Auth.js's own routes and static assets.

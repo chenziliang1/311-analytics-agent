@@ -10,7 +10,7 @@ export default function MarketingLayout({
 
   return (
     <>
-      <Navigation logoPrefix={brand.logoPrefix} logoAccent={brand.logoAccent} />
+      <Navigation logoPrefix={brand.logoPrefix} logoAccent={brand.logoAccent} repoUrl={brand.repoUrl} />
       {children}
     </>
   )

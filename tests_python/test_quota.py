@@ -25,10 +25,14 @@ from agent_app.config import Config
 from agent_app.quota import ATTR_INPUT_TOKEN
 from agent_app.quota import ATTR_INVOKE
 from agent_app.quota import ATTR_OUTPUT_TOKEN
+from agent_app.quota import ATTR_TTL
 from agent_app.quota import QuotaExceededError
 from agent_app.quota import APP_ID
+from agent_app.quota import REQUEST_ROW_LIFETIME
 from agent_app.quota import check_quota
+from agent_app.quota import count_request
 from agent_app.quota import get_app_id
+from agent_app.quota import get_request_id
 from agent_app.quota import get_usage
 from agent_app.quota import increment_usage
 
@@ -245,6 +249,58 @@ class TestMeteringFaultsDoNotDenyService:
         increment_usage(dynamodb, config, invokes=100, input_tokens=0, output_tokens=0, app_id="x")
         with pytest.raises(QuotaExceededError):
             check_quota(dynamodb, config, app_id="x")
+
+
+class TestCountRequest:
+    """
+    The daily per-address cap, which is what stands in for sign-in on the
+    public demo: one atomic write that counts and refuses.
+    """
+
+    DAY = datetime.datetime(2026, 10, 11, 12, tzinfo=datetime.timezone.utc)
+
+    def test_key_hashes_the_address_and_carries_kind_and_day(self):
+        key = get_request_id(make_config(), "203.0.113.7", "chat", self.DAY)
+        app, dataset, kind, digest, day = key.split(":")
+        assert (app, dataset, kind, day) == (APP_ID, "acme_widgets", "chat", "2026-10-11")
+        assert "203.0.113.7" not in key and len(digest) == 16
+        # The same address, however it was spaced, is the same visitor.
+        assert get_request_id(make_config(), " 203.0.113.7 ", "chat", self.DAY) == key
+
+    def test_counts_up_to_the_cap_then_refuses(self, dynamodb):
+        config = make_config(quota_max_requests_per_ip_per_day=3)
+        assert [count_request(dynamodb, config, "203.0.113.7", now=self.DAY) for _ in range(3)] == [1, 2, 3]
+        with pytest.raises(QuotaExceededError, match="Daily chat cap"):
+            count_request(dynamodb, config, "203.0.113.7", now=self.DAY)
+        # Refused requests are counted too, so the visitor stays refused.
+        with pytest.raises(QuotaExceededError, match="5 > 3"):
+            count_request(dynamodb, config, "203.0.113.7", now=self.DAY)
+
+    def test_addresses_days_and_kinds_are_separate_counters(self, dynamodb):
+        config = make_config(quota_max_requests_per_ip_per_day=1)
+        count_request(dynamodb, config, "203.0.113.7", now=self.DAY)
+        assert count_request(dynamodb, config, "203.0.113.8", now=self.DAY) == 1
+        assert count_request(dynamodb, config, "203.0.113.7", now=self.DAY + datetime.timedelta(days=1)) == 1
+        assert count_request(dynamodb, config, "203.0.113.7", kind="feedback", now=self.DAY) == 1
+        with pytest.raises(QuotaExceededError):
+            count_request(dynamodb, config, "203.0.113.7", now=self.DAY)
+
+    def test_rows_expire_through_the_ttl_attribute(self, dynamodb):
+        config = make_config()
+        count_request(dynamodb, config, "203.0.113.7", now=self.DAY)
+        key = get_request_id(config, "203.0.113.7", "chat", self.DAY)
+        item = dynamodb.get_item(TableName=TABLE, Key={"app_id": {"S": key}})["Item"]
+        assert int(item[ATTR_TTL]["N"]) == int((self.DAY + REQUEST_ROW_LIFETIME).timestamp())
+
+    def test_off_or_no_address_counts_nothing(self, dynamodb):
+        assert count_request(dynamodb, make_config(quota_enabled=False), "203.0.113.7") is None
+        assert count_request(dynamodb, make_config(), "") is None
+        assert dynamodb.scan(TableName=TABLE)["Count"] == 0
+
+    def test_a_failed_write_lets_the_request_through(self, dynamodb, capsys):
+        config = make_config(dynamodb_table_name_quota="no-such-table")
+        assert count_request(dynamodb, config, "203.0.113.7") is None
+        assert "ResourceNotFound" in capsys.readouterr().err
 
 
 if __name__ == "__main__":
