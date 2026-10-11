@@ -4,7 +4,7 @@
 
 311 Analytics Agent is a BI agent that answers natural-language questions about 311 service requests, backed by a Snowflake warehouse. It is built for the people who run 311 operations and the analysts who support them. Instead of writing SQL, they ask in plain English, such as "Which cities breached SLA most often last month?", and get an answer in seconds: a table or chart where it helps, plus a short note on exactly how each number was computed. The warehouse holds 23 tables and about 11 million rows of synthetic data covering 120 North American cities and counties.
 
-Live demo: https://citypulse-311-lens.vercel.app (no sign-in needed)
+Live demo: https://tinyurl.com/citypulse-311 (no sign-in needed)
 
 ## Run it
 
