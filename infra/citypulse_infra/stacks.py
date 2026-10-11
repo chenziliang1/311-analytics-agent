@@ -27,7 +27,7 @@ from .runtime import METRICS_NAMESPACE, AgentCoreRuntime, agent_image
 LLM_SECRET_KEYS = ["ANTHROPIC_API_KEY"]
 DB_SECRET_KEYS = ["DB_HOST", "DB_PORT", "DB_USER", "DB_PASS", "DB_NAME"]
 
-#: Claude Sonnet 5.5 list price per million tokens, for the cost estimate on
+#: Claude Sonnet list price per million tokens, for the cost estimate on
 #: the dashboard. An estimate, not the bill: update it with the price.
 INPUT_USD_PER_MTOK = 2.0
 OUTPUT_USD_PER_MTOK = 10.0
