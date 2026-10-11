@@ -28,7 +28,7 @@ Browser (Next.js on Vercel) -> agent runtime (AgentCore) -> MCP tools runtime (A
 ```
 
 - **Chat UI:** Next.js on Vercel. GitHub sign-in, live progress while a turn runs, CSV download for long results, and thumbs up or down on every answer.
-- **Agent:** Strands Agents with Claude Sonnet 5.5 on AWS Bedrock AgentCore. It interprets the question and words the answer.
+- **Agent:** Strands Agents with Claude Sonnet on AWS Bedrock AgentCore. It interprets the question and words the answer.
 - **Tools:** a separate MCP server, also on AgentCore. `warehouse_query` goes from semantic layer to SQL writer to guard to Snowflake to audit log.
 - **Infrastructure:** AWS CDK, Secrets Manager, and a CloudWatch dashboard with alarms.
 - **Quality loop:** a golden-set eval (35 cases, 70 runs: 97.1% SQL accuracy, 0% hallucination, 94.8% of answers citing the definition they rest on, p95 13.4 s; every run is a row in [`data/eval/results.md`](data/eval/results.md)), tests on every push and the eval on demand, a morning canary against the live agent, and thumbs-downs that become new test cases.

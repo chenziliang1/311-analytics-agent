@@ -205,7 +205,7 @@ class Config:
     #: None leaves the provider's default; reasoning models reject any value.
     sql_writer_temperature: float | None = dataclasses.field(default=0.0)
     #: How hard the agent's model thinks (anthropic only). None is the
-    #: model's default, which is ``high`` on Sonnet 5.5.
+    #: model's default, which is ``high`` on Sonnet.
     llm_effort: str | None = dataclasses.field(default=None)
     #: The same for the SQL writer.
     sql_writer_effort: str | None = dataclasses.field(default=None)
