@@ -9,9 +9,14 @@
 
 USE ROLE ACCOUNTADMIN;
 
--- SMALL, suspends after 60s idle, 60s statement cap.
+-- X-Small, suspends after 60s idle, 60s statement cap. X-Small is enough for
+-- aggregates over ten million rows, and the warehouse is this demo's largest
+-- cost once the trial ends: it bills a 60-second minimum on every resume, so
+-- a question asked in isolation costs about two minutes of credits, and the
+-- idle window stays at 60s because a shorter one re-bills that minimum for
+-- the next question in the same conversation.
 CREATE WAREHOUSE IF NOT EXISTS CITYPULSE_WH
-  WAREHOUSE_SIZE = SMALL
+  WAREHOUSE_SIZE = XSMALL
   AUTO_SUSPEND = 60
   AUTO_RESUME = TRUE
   INITIALLY_SUSPENDED = TRUE
