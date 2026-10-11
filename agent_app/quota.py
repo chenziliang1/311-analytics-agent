@@ -1,7 +1,13 @@
 # -*- coding: utf-8 -*-
 
 """
-Monthly LLM spend cap, backed by one DynamoDB row per (deployment, month).
+Spend caps for a public deployment, backed by DynamoDB counters.
+
+Two caps, both in the same table. The monthly one is one row per
+(deployment, month) and bounds what the whole demo can cost. The daily one is
+one row per (network address, day) and bounds what one visitor can cost, since
+the chat needs no sign-in: :func:`count_request` adds one and refuses past the
+cap in a single atomic write.
 
 **Off by default** (``Config.quota_enabled``): it needs a DynamoDB table that
 does not exist until someone creates it, and it is meant for a public
@@ -22,6 +28,7 @@ never sees a session and cannot reach any other service.
 
 import typing as T
 import datetime
+import hashlib
 
 from .utils import debug
 
@@ -38,10 +45,81 @@ APP_ID = "311-analytics-agent"
 ATTR_INVOKE = "total_invoke"
 ATTR_INPUT_TOKEN = "total_input_token"
 ATTR_OUTPUT_TOKEN = "total_output_token"
+#: The daily per-address rows expire on their own: the table's TTL attribute.
+ATTR_TTL = "ttl"
+
+#: How long a per-address row outlives its day before DynamoDB deletes it.
+#: Generous on purpose; the key carries the date, so a stale row is never read.
+REQUEST_ROW_LIFETIME = datetime.timedelta(days=2)
 
 
 class QuotaExceededError(RuntimeError):
     """Raised when the current month's usage has hit a configured cap."""
+
+
+def get_request_id(
+    config: "Config", ip: str, kind: str = "chat", now: datetime.datetime | None = None
+) -> str:
+    """
+    The partition key of one network address's counter for one day:
+    ``<app>:<dataset>:<kind>:<hash>:<YYYY-MM-DD>``.
+
+    The address is stored hashed, not in clear: the counter needs a stable
+    key, not the address, and the table is not a visitor log. ``kind``
+    separates what is counted (questions, feedback) so each has its own cap.
+    """
+    if now is None:
+        now = datetime.datetime.now(datetime.timezone.utc)
+    digest = hashlib.sha256(ip.strip().encode()).hexdigest()[:16]
+    return f"{APP_ID}:{config.schema_name}:{kind}:{digest}:{now:%Y-%m-%d}"
+
+
+def count_request(
+    dynamodb_client: T.Any,
+    config: "Config",
+    ip: str,
+    kind: str = "chat",
+    cap: int | None = None,
+    now: datetime.datetime | None = None,
+) -> int | None:
+    """
+    Count one request from ``ip`` and refuse it once today's cap is passed.
+
+    One atomic ``ADD`` that returns the new total, so two requests arriving
+    together cannot both squeeze under the cap. The refused request is
+    counted too; it costs nothing, and counting it keeps the key hot so a
+    visitor hammering the endpoint stays refused.
+
+    Returns the new count, or None when the cap is off, when there is no
+    address to count, or when the counter could not be written: none of
+    those is a reason to refuse. Raises :class:`QuotaExceededError` when
+    the count has gone past the cap.
+    """
+    if not config.quota_enabled or not ip:
+        return None
+    if cap is None:
+        cap = config.quota_max_requests_per_ip_per_day
+    if now is None:
+        now = datetime.datetime.now(datetime.timezone.utc)
+    request_id = get_request_id(config, ip, kind, now)
+    expires = int((now + REQUEST_ROW_LIFETIME).timestamp())
+    try:
+        response = dynamodb_client.update_item(
+            TableName=config.dynamodb_table_name_quota,
+            Key={"app_id": {"S": request_id}},
+            # `ttl` is a reserved word in an expression, hence the alias.
+            UpdateExpression=f"ADD {ATTR_INVOKE} :i SET #ttl = :t",
+            ExpressionAttributeNames={"#ttl": ATTR_TTL},
+            ExpressionAttributeValues={":i": {"N": "1"}, ":t": {"N": str(expires)}},
+            ReturnValues="UPDATED_NEW",
+        )
+        count = _counter(response.get("Attributes") or {}, ATTR_INVOKE)
+    except Exception as e:
+        debug(f"[quota] request count failed, allowing request: {e}")
+        return None
+    if count > cap:
+        raise QuotaExceededError(f"Daily {kind} cap reached for {request_id}: {count} > {cap}")
+    return count
 
 
 def get_app_id(config: "Config", now: datetime.datetime | None = None) -> str:

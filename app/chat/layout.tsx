@@ -12,7 +12,7 @@ export default function ChatLayout({
 
   return (
     <div className="min-h-screen bg-background">
-      <Navigation logoPrefix={brand.logoPrefix} logoAccent={brand.logoAccent} />
+      <Navigation logoPrefix={brand.logoPrefix} logoAccent={brand.logoAccent} repoUrl={brand.repoUrl} />
       <div className="pt-16">{children}</div>
       {/* Without this, every toast.error() in the chat UI — including the
           rate-limit notice — is a silent no-op. */}

@@ -40,6 +40,7 @@ from agent_app.chat import record_feedback_via_mcp
 from agent_app.chat import relay
 from agent_app.chat import run_agent_turn
 from agent_app.quota import check_quota
+from agent_app.quota import count_request
 from agent_app.quota import increment_usage
 from agent_app.quota import QuotaExceededError
 # fmt: on
@@ -58,6 +59,31 @@ QUOTA_EXCEEDED_MESSAGE = (
     "billing cycle. The chat will start working again when the budget resets at "
     "the beginning of next month. Thanks for trying it out."
 )
+
+#: Shown when one network address has asked its share for the day. The chat
+#: needs no sign-in, so this is what keeps one visitor from spending the
+#: month's budget alone. `{cap}` becomes the number.
+DAILY_CAP_MESSAGE = (
+    "This demo answers up to {cap} questions a day from one network, and that "
+    "limit has been reached. It resets at midnight UTC. The code is open, so "
+    "you can also run it against your own warehouse: "
+    "https://github.com/chenziliang1/311-analytics-agent"
+)
+
+
+def client_ip(request: Request) -> str:
+    """
+    The visitor's network address, as the platform in front of us saw it.
+
+    Vercel sets `x-forwarded-for` from the connection it accepted, with the
+    client first; a value the browser sent itself is replaced, not appended
+    to. Locally there is no proxy and the socket's peer is the answer.
+    """
+    forwarded = request.headers.get("x-forwarded-for") or ""
+    first = forwarded.split(",")[0].strip()
+    if first:
+        return first
+    return request.client.host if request.client else ""
 
 
 @app.get("/api/hello")
@@ -91,6 +117,13 @@ async def handle_feedback(request: Request):
     if not isinstance(vote, dict) or vote.get("rating") not in ("up", "down"):
         return JSONResponse({"status": "invalid", "error": "rating must be up or down"}, status_code=400)
     user = request.headers.get("x-lens-user") or None
+
+    # --- Anyone can vote, so one network gets a day's worth, not unlimited ---
+    try:
+        count_request(one.dynamodb_client(), one.config, client_ip(request), kind="feedback")
+    except QuotaExceededError as e:
+        debug(f"[Feedback] blocked: {e}")
+        return JSONResponse({"status": "error", "error": "daily limit reached"}, status_code=429)
 
     runtime_arn = one.config.agentcore_runtime_arn
     try:
@@ -183,6 +216,15 @@ async def handle_chat_data(request: Request, protocol: str = Query("data")):
     except QuotaExceededError as e:
         debug(f"[Quota] blocked: {e}")
         return ai_sdk_streaming_response(QUOTA_EXCEEDED_MESSAGE)
+
+    # --- And one network's share of it: the chat needs no sign-in ---
+    try:
+        count_request(one.dynamodb_client(), one.config, client_ip(request), kind="chat")
+    except QuotaExceededError as e:
+        debug(f"[Quota] blocked: {e}")
+        return ai_sdk_streaming_response(
+            DAILY_CAP_MESSAGE.format(cap=one.config.quota_max_requests_per_ip_per_day)
+        )
 
     # --- Run the turn: here, or on AgentCore Runtime when one is configured ---
     # Same request body either way; the container runs the same run_agent_turn.

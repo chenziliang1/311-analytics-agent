@@ -285,6 +285,8 @@ class Config:
     quota_max_invoke_per_month: int = dataclasses.field(default=1000)
     quota_max_input_token_per_month: int = dataclasses.field(default=50_000_000)
     quota_max_output_token_per_month: int = dataclasses.field(default=10_000_000)
+    #: Questions one network address may ask in a day, once the cap is on.
+    quota_max_requests_per_ip_per_day: int = dataclasses.field(default=40)
 
     def __post_init__(self):
         """
@@ -493,6 +495,7 @@ class Config:
             quota_max_output_token_per_month=(
                 get_env_int("QUOTA_MAX_OUTPUT_TOKEN_PER_MONTH") or 10_000_000
             ),
+            quota_max_requests_per_ip_per_day=get_env_int("QUOTA_MAX_REQUESTS_PER_IP_PER_DAY") or 40,
         )
         values.update(overrides)
         return cls(**values)

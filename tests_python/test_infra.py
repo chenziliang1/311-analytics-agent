@@ -93,8 +93,37 @@ def test_web_invoker_can_only_invoke_the_agent(templates):
         for p in templates["A"].find_resources("AWS::IAM::Policy").values()
         if "WebInvoker" in json.dumps(p["Properties"].get("Users", []))
     ]
-    assert [s["Action"] for s in user_policy] == ["bedrock-agentcore:InvokeAgentRuntime"]
+    # Exactly two statements: invoke the one agent, and keep the counters in
+    # the one table. The second is scoped to the table's own ARN.
+    assert [s["Action"] for s in user_policy] == [
+        "bedrock-agentcore:InvokeAgentRuntime",
+        ["dynamodb:GetItem", "dynamodb:UpdateItem"],
+    ]
+    assert "Quota" in json.dumps(user_policy[1]["Resource"])
     templates["A"].resource_count_is("AWS::IAM::AccessKey", 0)
+
+
+def test_quota_table_matches_env_defaults_and_expires_daily_rows():
+    """
+    `agent_app/quota.py` reads the table's name from .env.defaults and the
+    stack creates it by name; the two strings must stay one. The daily rows
+    carry a TTL so a public demo's counters do not accumulate forever.
+    """
+    from citypulse_infra.stacks import QUOTA_TABLE_NAME
+
+    root = Path(__file__).resolve().parents[1]
+    assert f'DYNAMODB_TABLE_NAME_QUOTA="{QUOTA_TABLE_NAME}"' in (root / ".env.defaults").read_text()
+    app = cdk.App()
+    env = cdk.Environment(account="111122223333", region="us-east-1")
+    secrets = SecretsStack(app, "S", env=env)
+    mcp = McpRuntimeStack(app, "M", secrets=secrets, env=env)
+    t = Template.from_stack(AgentRuntimeStack(app, "A", secrets=secrets, mcp=mcp, env=env))
+    t.has_resource_properties("AWS::DynamoDB::Table", Match.object_like({
+        "TableName": QUOTA_TABLE_NAME,
+        "KeySchema": [{"AttributeName": "app_id", "KeyType": "HASH"}],
+        "BillingMode": "PAY_PER_REQUEST",
+        "TimeToLiveSpecification": {"AttributeName": "ttl", "Enabled": True},
+    }))
 
 
 def test_dockerignore_allows_what_the_build_needs_and_never_env():
