@@ -437,6 +437,15 @@ def test_server_lists_and_calls_tools(engine, registry):
     query_args = next(t for t in tools.tools if t.name == "warehouse_query").inputSchema["properties"]
     # The model never says who is asking: identity is filled in by the system.
     assert "user_role" not in query_args
+    # Every tool says what it does to the world; only the vote writes anything.
+    hints = {t.name: (t.annotations.readOnlyHint, t.annotations.destructiveHint) for t in tools.tools}
+    assert hints == {
+        "warehouse_query": (True, False),
+        "list_sources": (True, False),
+        "read_source": (True, False),
+        "visualize": (True, False),
+        "record_feedback": (False, False),
+    }
     assert voted.structuredContent["status"] == "ok"
     assert [(v.rating, v.comment, v.user_id) for v in votes] == [("down", "wrong total", "anonymous")]
     assert bad.structuredContent["status"] == "invalid"
