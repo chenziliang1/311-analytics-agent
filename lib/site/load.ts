@@ -80,7 +80,10 @@ export function loadSite(): SiteConfig {
     )
   }
 
-  const site = parsed as SiteConfig
+  // smol-toml builds its tables on a null prototype (so a key named
+  // `__proto__` cannot poison anything). React refuses to hand such an object
+  // from a server component to a client one; the clone is a plain object.
+  const site = structuredClone(parsed) as SiteConfig
   assertIconsExist(file, site)
 
   siteCache = site

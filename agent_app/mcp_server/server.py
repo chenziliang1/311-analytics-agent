@@ -18,6 +18,7 @@ import logging
 import threading
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
 from .feedback import FEEDBACK_TOOL, Feedback, FeedbackSink
 from .knowledge import read_source as read_source_document
@@ -43,6 +44,14 @@ and cite it. Call list_sources to find an id you do not have. Every ok result
 has a result_id: write [RESULT:<id>] on its own line to show its rows, and
 call visualize with the id and column names to chart them. Never retype rows.
 """
+
+# What each tool does to the world, for a client that reads tool hints before
+# calling (and for a registry that scores servers on declaring them). The
+# analytics tools only read: warehouse_query's SQL is checked read-only before
+# it runs, and its audit-log row is bookkeeping, not state a caller sees.
+# record_feedback appends a row, so a repeat call stores a second vote.
+READS = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+APPENDS = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False)
 
 
 class DropClientDisconnects(logging.Filter):
@@ -205,7 +214,7 @@ def build_server(deps_factory=default_deps, feedback_factory=default_feedback_si
     """
     server = FastMCP("citypulse-warehouse", instructions=INSTRUCTIONS, **settings)
 
-    @server.tool(name="warehouse_query")
+    @server.tool(name="warehouse_query", annotations=READS)
     def warehouse_query(
         intent: str,
         requested_metrics: list[str] | None = None,
@@ -254,7 +263,7 @@ def build_server(deps_factory=default_deps, feedback_factory=default_feedback_si
             session_id=session_id,
         )
 
-    @server.tool(name="list_sources")
+    @server.tool(name="list_sources", annotations=READS)
     def list_sources(user_id: str = "") -> SourceIndexOutput:
         """
         The knowledge base index: one line per approved definition (metrics,
@@ -269,7 +278,7 @@ def build_server(deps_factory=default_deps, feedback_factory=default_feedback_si
         """
         return source_index(deps_factory(), user_id=user_id)
 
-    @server.tool(name="read_source")
+    @server.tool(name="read_source", annotations=READS)
     def read_source(id: str, user_id: str = "") -> SourceOutput:
         """
         One knowledge base document: what a metric means and how it is
@@ -288,7 +297,7 @@ def build_server(deps_factory=default_deps, feedback_factory=default_feedback_si
         """
         return read_source_document(deps_factory(), id, user_id=user_id)
 
-    @server.tool(name="visualize")
+    @server.tool(name="visualize", annotations=READS)
     def visualize(
         result_id: str,
         x: str,
@@ -331,7 +340,7 @@ def build_server(deps_factory=default_deps, feedback_factory=default_feedback_si
             )
         return build_chart(chart_type, title, categories, series, y_label, result_id=result_id)
 
-    @server.tool(name=FEEDBACK_TOOL)
+    @server.tool(name=FEEDBACK_TOOL, annotations=APPENDS)
     def record_feedback(
         rating: str,
         session_id: str = "",
