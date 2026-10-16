@@ -6,6 +6,10 @@
 
 Live demo: https://tinyurl.com/citypulse-311 (no sign-in needed)
 
+One question, answered: a line with the figures, the chart it asked for, the rows behind it, the SQL that produced them, and a citation of the metric's definition.
+
+![The demo answering a question about classifier accuracy by vocabulary drift: a one-line answer, a bar chart, the result rows, the SQL that was run, and a citation chip](docs/demo.png)
+
 ## Run it
 
 You need an Anthropic API key and a warehouse of your own: Snowflake, or PostgreSQL with `WAREHOUSE=postgres`. The dataset itself is not in this repository. AWS and Vercel accounts are only needed to deploy.
