@@ -88,9 +88,9 @@ tagline = "311 Service Request Analytics Agent"
 
 description = "An AI agent that helps the teams running a city 311 hotline understand what really happens to residents' reports, through natural conversation. Find requests sent down the wrong queue, emergencies filed as routine, quick closures that fixed nothing, and the early signs of a complaint to city council."
 
-blurb = "Analyzing 311 service request data: 23 tables, ~11.1 million records covering 120 cities, a million resident reports, their work orders, and the model that sorts them"
+blurb = "Synthetic demo dataset: 23 tables, ~11.1 million records across 120 simulated cities and counties, a million resident reports, their work orders, and the model that sorts them"
 
-techStack = ["Strands SDK", "AWS Bedrock", "PostgreSQL", "Next.js"]
+techStack = ["Strands SDK", "AWS Bedrock", "Snowflake", "Next.js"]
 
 [home.headline]
 prefix = "CityPulse 311 "
