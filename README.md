@@ -4,7 +4,7 @@
 
 311 Analytics Agent is a BI agent that answers natural-language questions about 311 service requests, backed by a Snowflake warehouse. It is built for the people who run 311 operations and the analysts who support them. Instead of writing SQL, they ask in plain English, such as "Which cities breached SLA most often last month?", and get an answer in seconds: a table or chart where it helps, plus a short note on exactly how each number was computed. The warehouse holds 23 tables and about 11 million rows of synthetic data covering 120 North American cities and counties.
 
-Live demo: https://tinyurl.com/citypulse-311 (no sign-in needed)
+Live demo: https://tinyurl.com/citypulse-311 (no sign-in needed). The demo runs on Snowflake; PostgreSQL is the other supported warehouse, see "Run it".
 
 One question, answered: a line with the figures, the chart it asked for, the rows behind it, the SQL that produced them, and a citation of the metric's definition.
 
@@ -35,7 +35,7 @@ Browser (Next.js on Vercel) -> agent runtime (AgentCore) -> MCP tools runtime (A
 - **Agent:** Strands Agents with Claude Sonnet on AWS Bedrock AgentCore. It interprets the question and words the answer.
 - **Tools:** a separate MCP server, also on AgentCore. `warehouse_query` goes from semantic layer to SQL writer to guard to Snowflake to audit log.
 - **Infrastructure:** AWS CDK, Secrets Manager, and a CloudWatch dashboard with alarms.
-- **Quality loop:** a golden-set eval (35 cases, 70 runs: 97.1% SQL accuracy, 0% hallucination, 94.8% of answers citing the definition they rest on, p95 13.4 s; every run is a row in [`data/eval/results.md`](data/eval/results.md)), tests on every push and the eval on demand, a morning canary against the live agent, and thumbs-downs that become new test cases.
+- **Quality loop:** a golden-set eval (35 cases, 70 runs: 97.1% SQL accuracy, 0 hallucinations observed across the 70 runs, 94.8% of answers citing the definition they rest on, p95 13.4 s; every run is a row in [`data/eval/results.md`](data/eval/results.md)), tests on every push and the eval on demand, a morning canary against the live agent, and thumbs-downs that become new test cases.
 
 The decision I would make again: **the agent never writes SQL.** A dedicated writer model does, and it sees the semantic layer's definition and a reference query for every metric the question names. Each number therefore has exactly one definition, and the agent can stay focused on understanding the user.
 
