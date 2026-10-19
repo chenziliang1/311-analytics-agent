@@ -390,6 +390,8 @@ class Config:
             internal_role=self.snowflake_role if self.warehouse == "snowflake" else None,
             user_roles=dict(self.tenant_role_map),
             default_role=self.tenant_default_role,
+            # A role table is scope even before it has been read: see TenantAccess.configured.
+            configured=self.tenant_role_table is not None,
         )
 
     @property

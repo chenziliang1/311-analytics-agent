@@ -95,13 +95,29 @@ class TestRoleDirectory:
         assert d["ada"] == "SHOP_PLANT_NORTH" and len(errors) == 1
 
     def test_before_any_good_read_nobody_is_mapped(self):
-        """Fail closed: with no default role, an unmapped user is refused."""
-        d, _, _, errors = self.directory([RuntimeError("warehouse down")])
+        """
+        Fail closed: a table that cannot be read maps nobody, and with no
+        default role nobody runs a query. The empty map must not pass for
+        "no map configured", which would run everyone as the service role.
+        """
+        rows = [RuntimeError("warehouse down")]
+        d, _, clock, errors = self.directory(rows)
         assert len(d) == 0 and errors
-        access = TenantAccess(internal_role="SHOP_RO", user_roles=d)
-        assert not access.enabled  # nothing mapped and no default: scope is off, as before any table
-        access = TenantAccess(internal_role="SHOP_RO", user_roles=d, default_role="SHOP_GUEST")
-        assert access.role_for("ada").role == "SHOP_GUEST"
+        access = TenantAccess(internal_role="SHOP_RO", user_roles=d, configured=True)
+        assert access.enabled
+        decision = access.role_for("ada")
+        assert decision.role is None and decision.switch is False and decision.refused
+        with_default = TenantAccess(internal_role="SHOP_RO", user_roles=d, default_role="SHOP_GUEST", configured=True)
+        assert with_default.role_for("ada").role == "SHOP_GUEST"
+        # Once the table can be read, the same access object maps ada.
+        rows[0] = [("ada", "SHOP_PLANT_NORTH")]
+        clock["t"] = 301
+        assert access.role_for("ada").role == "SHOP_PLANT_NORTH"
+
+    def test_an_unconfigured_empty_map_is_still_no_scope(self):
+        """A deployment with no map, table or default serves internal staff only."""
+        d, _, _, _ = self.directory([[]])
+        assert not TenantAccess(internal_role="SHOP_RO", user_roles=d).enabled
 
     def test_a_bad_role_name_in_the_table_fails_the_read(self):
         rows = [[("ada", "SHOP RO; DROP")]]

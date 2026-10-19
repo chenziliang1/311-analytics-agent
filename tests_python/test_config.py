@@ -110,6 +110,13 @@ class TestConfig:
         assert access.role_for("ada").role == "SHOP_PLANT_NORTH"
         assert access.role_for("cy").role == "SHOP_GUEST"
 
+    def test_a_role_table_is_scope_before_it_is_read(self):
+        """Naming a table configures scope; an unreadable or empty table must not switch it off."""
+        config = Config(warehouse="snowflake", snowflake_role="SHOP_RO", tenant_role_table="AUDIT.USER_ROLE_ACCESS")
+        access = config.tenant_access
+        assert access.configured and access.enabled
+        assert access.role_for("ada").refused  # nothing read yet, no default: refused, not internal
+
     def test_tenant_roles_must_be_identifiers(self):
         with pytest.raises(ValueError, match="TENANT_ROLE_MAP"):
             Config(tenant_role_map={"ada": "SHOP RO"})

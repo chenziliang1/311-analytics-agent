@@ -74,7 +74,9 @@ class RoleDirectory(T.Mapping[str, str]):
     source fails, the last good reading stays in force rather than every
     user becoming unmapped at once; before any good reading, nobody is
     mapped, which with no default role means nobody runs a query: fail
-    closed, loudly.
+    closed, loudly. That last part holds only because the TenantAccess
+    holding this directory is marked ``configured``: an empty directory on
+    its own looks like no map at all.
     """
 
     def __init__(
@@ -131,11 +133,18 @@ class TenantAccess:
     user_roles: T.Mapping[str, str] = dataclasses.field(default_factory=dict)
     #: The role for a user the map does not name. None refuses their queries.
     default_role: str | None = None
+    #: Per-user scope was configured, whatever the map holds right now. Set
+    #: when a role table is named: a table that cannot be read yet (or is
+    #: empty) leaves ``user_roles`` empty, and an empty map must not read as
+    #: "nothing configured, everyone is internal", or the one failure the
+    #: directory is built to survive would hand every user the service
+    #: connection's cross-tenant role.
+    configured: bool = False
 
     @property
     def enabled(self) -> bool:
         """Per-user scope is configured at all."""
-        return bool(self.user_roles) or self.default_role is not None
+        return self.configured or bool(self.user_roles) or self.default_role is not None
 
     def role_for(self, user_id: str | None) -> "RoleDecision":
         """The role ``user_id``'s queries run as, or the refusal."""
