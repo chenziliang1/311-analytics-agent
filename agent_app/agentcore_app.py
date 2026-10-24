@@ -9,7 +9,6 @@ body, forwarded unchanged by the web app, and the reply is a ChatResult as
 JSON; the web app turns it into the SSE stream the browser reads.
 """
 
-import contextlib
 import json
 import threading
 import time
@@ -36,7 +35,10 @@ from .vendor.vercel_ai_sdk import RequestBody
 def build_app(agent_factory=None, metrics=None, feedback_recorder=None, source_reader=None) -> FastAPI:
     """
     :param agent_factory: Returns the agent; the default is ``one.agent``,
-        built in the background at startup so /ping answers right away.
+        built on the first request. Not at startup: AgentCore starts about
+        340 containers a day that never get a request, and building the agent
+        opens a session on the tools runtime, which kept that one up 20
+        minutes and woke the warehouse every few minutes, all day.
     :param metrics: Where turn metrics go; the default follows the config.
     :param feedback_recorder: Records one vote's record_feedback arguments and
         returns the tool's output; the default calls the MCP server directly.
@@ -51,21 +53,12 @@ def build_app(agent_factory=None, metrics=None, feedback_recorder=None, source_r
             return agent_factory()
         from .api import one  # pragma: no cover - the real agent
 
-        # The warm-up thread and the first request can both get here while
-        # the agent is being built; it should be built once.
+        # Two first requests can both get here while the agent is being
+        # built; it should be built once.
         with building:  # pragma: no cover
             return one.agent
 
-    @contextlib.asynccontextmanager
-    async def lifespan(app):
-        if agent_factory is None:  # pragma: no cover - builds the real agent
-            # Build the agent and open its MCP connection now, not on the
-            # first question: that also starts the tools runtime's own cold
-            # start while nobody is waiting yet. /ping answers meanwhile.
-            threading.Thread(target=agent, name="agent-warm-up", daemon=True).start()
-        yield
-
-    app = FastAPI(lifespan=lifespan)
+    app = FastAPI()
 
     def sink():
         if metrics is not None:

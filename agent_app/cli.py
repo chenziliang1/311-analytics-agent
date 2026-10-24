@@ -481,13 +481,18 @@ class Cli:
         """
         from agent_app.mcp_server.server import build_server, warm_up
 
-        # A cold start is a user waiting: get the warehouse ready while the
-        # agent is still on its first model call. Writes only to stderr, so
-        # it is safe under stdio too.
-        warm_up()
         if transport == "stdio":
+            # Started on the first question, so a user is waiting: get the
+            # warehouse ready while the agent is still on its first model
+            # call. Writes only to stderr, so it is safe under stdio.
+            warm_up()
             server = build_server()
         else:
+            # No warm-up here: a session can start with nobody asking (an
+            # agent container opening its connection), and the warm-up's
+            # SELECT 1 resumed the warehouse for its 60-second minimum each
+            # time. The first tool call connects instead.
+            #
             # Stateless: each request stands alone, so any instance behind a
             # load balancer can answer it. Plain JSON responses, not an SSE
             # stream per request: behind AgentCore's proxy the stream was
