@@ -58,12 +58,17 @@ class NoMetrics:
 def query_metrics_sink(metrics: "Metrics | NoMetrics") -> T.Callable[[dict], None]:
     """
     An audit sink that turns each warehouse query record into metrics:
-    a count by status (the error-rate and blocked-query alarms read it) and
-    the tool's latency.
+    a count by status (the error-rate and blocked-query alarms read it),
+    the tool's latency, and the guard rejections the writer was given a
+    repair for, which a status alone hides.
     """
 
     def write(record: dict) -> None:
         metrics.put("WarehouseQueries", 1, dimensions={"Status": record.get("status", "unknown")})
         metrics.put("WarehouseQueryLatency", record.get("seconds", 0.0), unit="Seconds")
+        # Only when there were any: each point is a CloudWatch call.
+        rejections = sum(1 for a in record.get("attempts", ()) if a.get("kind") == "guard")
+        if rejections:
+            metrics.put("WarehouseGuardRejections", rejections)
 
     return write
