@@ -187,6 +187,45 @@ def test_sql_error_gets_one_repair(engine, registry):
     assert "nope" in writer.requests[1]
 
 
+def test_a_repaired_guard_rejection_is_audited_as_an_attempt(engine, registry):
+    writer = ScriptedWriter(
+        sql("SELECT COUNT(*) AS n FROM widgets"),
+        sql("SELECT COUNT(*) AS n FROM widget"),
+    )
+    log = []
+    answer(make_deps(engine, registry, writer, log), "how many widgets")
+    assert log[0]["status"] == "ok"
+    assert [a["kind"] for a in log[0]["attempts"]] == ["guard"]
+    assert "unknown table 'widgets'" in log[0]["attempts"][0]["reason"]
+    assert "sql" not in log[0]["attempts"][0]
+
+
+def test_a_first_try_success_audits_no_attempts(engine, registry):
+    log = []
+    answer(make_deps(engine, registry, ScriptedWriter(sql("SELECT COUNT(*) AS n FROM widget")), log), "how many widgets")
+    assert log[0]["attempts"] == []
+
+
+def test_a_rewritten_database_error_is_audited_as_an_attempt(engine, registry):
+    writer = ScriptedWriter(
+        sql("SELECT nope FROM widget"),
+        sql("SELECT COUNT(*) AS n FROM widget"),
+    )
+    log = []
+    answer(make_deps(engine, registry, writer, log), "how many widgets")
+    assert log[0]["status"] == "ok"
+    assert [a["kind"] for a in log[0]["attempts"]] == ["db_error"]
+    assert "nope" in log[0]["attempts"][0]["reason"]
+
+
+def test_a_boundary_rejection_audits_blocked_with_no_attempts(engine, registry):
+    """Refused outright, not retried: the status already says it all."""
+    log = []
+    answer(make_deps(engine, registry, ScriptedWriter(sql("DELETE FROM widget")), log), "remove the widgets")
+    assert log[0]["status"] == "blocked"
+    assert log[0]["attempts"] == []
+
+
 def test_dropped_connection_is_retried_without_the_writer(engine, registry, monkeypatch):
     from agent_app.mcp_server import warehouse
     from agent_app.sql_utils import QueryRows
