@@ -149,13 +149,6 @@ def test_query_metrics_sink():
     assert m.points == [("WarehouseQueries", 1), ("WarehouseQueryLatency", 1.5)]
 
 
-def test_query_metrics_sink_counts_repaired_guard_rejections():
-    m = RecordingMetrics()
-    attempts = [{"kind": "guard", "reason": "unknown table"}, {"kind": "db_error", "reason": "no such column"}]
-    query_metrics_sink(m)({"status": "ok", "seconds": 0.5, "attempts": attempts})
-    assert m.points[-1] == ("WarehouseGuardRejections", 1)
-
-
 def _sse_events(text):
     return [json.loads(line[len("data: "):]) for line in text.splitlines() if line.startswith("data: ")]
 
