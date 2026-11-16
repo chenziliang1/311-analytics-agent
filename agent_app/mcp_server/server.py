@@ -283,9 +283,12 @@ def build_server(deps_factory=default_deps, feedback_factory=default_feedback_si
         """
         One knowledge base document: what a metric means and how it is
         computed, what a term means, what a time window covers, or an
-        entity's profile (e.g. tenant/austin_tx). Read the definition behind
-        a number before you say how it was computed, and put the returned
-        citation marker, exactly, at the end of that line.
+        entity's profile (e.g. tenant/austin_tx). For a number warehouse_query
+        returned, write how it was computed from the sources in that result
+        and cite those; no call needed. Read one here only for an id whose
+        text you do not have: one from list_sources, an entity profile, or a
+        definition asked about without a query. End the line with the
+        returned citation marker, exactly.
 
         Args:
             id: A source id as returned by warehouse_query or listed by
