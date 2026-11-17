@@ -9,6 +9,7 @@ real model, so they are written out literally here.
 """
 
 from agent_app.agent_response import extract_text_from_messages
+from agent_app.agent_response import has_tool_call_markup
 from agent_app.agent_response import normalize_render_blocks
 from agent_app.agent_response import parse_agent_response
 from agent_app.agent_response import parse_response_text
@@ -202,3 +203,25 @@ class TestParseAgentResponse:
     def test_start_index_is_passed_through(self):
         messages = [_assistant("old answer"), _user("new q"), _assistant("new answer")]
         assert parse_agent_response(messages, 1)[1] == "new answer"
+
+
+class TestHasToolCallMarkup:
+    """A tool call written out as text instead of made (issue #24)."""
+
+    def test_an_invoke_block_is_markup(self):
+        text = (
+            '<invoke name="warehouse_query"> <parameter name="question">'
+            "How many widgets shipped last month?</parameter> </invoke>"
+        )
+        assert has_tool_call_markup(text)
+
+    def test_any_piece_of_it_is_markup_whatever_the_case_or_prefix(self):
+        assert has_tool_call_markup("Sure.\n<INVOKE NAME='warehouse_query'>")
+        assert has_tool_call_markup('<parameter name="question">Widgets?</parameter>')
+        assert has_tool_call_markup("</invoke>")
+        assert has_tool_call_markup('<shop:invoke name="warehouse_query">')
+
+    def test_the_word_invoke_in_prose_is_not(self):
+        assert not has_tool_call_markup("Each invoke of the gadget press adds one widget.")
+        assert not has_tool_call_markup("Widgets < 5 parameter checks failed; invoke name changes later.")
+        assert not has_tool_call_markup("")

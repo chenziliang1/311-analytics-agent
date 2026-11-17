@@ -115,3 +115,23 @@ def parse_agent_response(
         extract_text_from_messages(messages, start_index)
     )
     return thinking, normalize_render_blocks(answer)
+
+
+#: A tool call written out as text instead of made: ``<invoke name="...">``,
+#: ``<parameter name="...">`` or a closing ``</invoke>``, with or without a
+#: namespace prefix. The bare word "invoke" in prose does not match.
+_TOOL_CALL_MARKUP = re.compile(
+    r"<(?:[\w-]+:)?(?:invoke|parameter)\s+name\s*=|</(?:[\w-]+:)?invoke\s*>",
+    re.IGNORECASE,
+)
+
+
+def has_tool_call_markup(text: str) -> bool:
+    """
+    Whether an answer is (or contains) tool-call markup.
+
+    The model now and then writes the call it meant to make into its reply
+    instead of making it (issue #24). The user would see raw XML where the
+    answer should be, so the turn runs again instead (chat.run_agent_turn).
+    """
+    return bool(_TOOL_CALL_MARKUP.search(text or ""))
