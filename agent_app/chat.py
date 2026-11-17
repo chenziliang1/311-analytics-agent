@@ -20,10 +20,11 @@ import threading
 import typing as T
 import uuid
 
-from .agent_response import parse_agent_response
+from .agent_response import has_tool_call_markup, parse_agent_response
 from .ai_sdk_adapter import earlier_turn_values, get_last_user_message_text, request_body_to_agent_history
 from .number_check import unverified_numbers
 from .turn_observer import Listener, TurnObserver, summarize
+from .utils import debug
 from .vendor.vercel_ai_sdk import RequestBody
 
 #: An empty answer streams an empty text block, and the UI then shows a
@@ -33,6 +34,11 @@ EMPTY_ANSWER = (
     "I worked through this but did not produce a final message. "
     "The reasoning above has what I found — ask me to restate it."
 )
+
+#: Shown instead of an answer that was tool-call markup twice in a row. The
+#: markup itself never reaches the user: it is a broken call, not an answer.
+MARKUP_ANSWER = "I could not produce an answer to this question. Please ask it again."
+MARKUP_WARNING = "The answer could not be produced: the model wrote a tool call as text instead of making it."
 
 
 @dataclasses.dataclass(frozen=True)
@@ -51,6 +57,8 @@ class ChatResult:
     unverified_numbers: list[str] = dataclasses.field(default_factory=list)
     #: The numbers this turn's queries returned (turn_observer.summarize).
     values: list[float] = dataclasses.field(default_factory=list)
+    #: Times the turn ran again because its answer was tool-call markup.
+    markup_retries: int = 0
 
     def to_json(self) -> dict:
         return dataclasses.asdict(self)
@@ -67,6 +75,7 @@ class ChatResult:
             tables=list(data.get("tables") or []),
             unverified_numbers=[str(n) for n in data.get("unverified_numbers") or []],
             values=[float(v) for v in data.get("values") or []],
+            markup_retries=int(data.get("markup_retries", 0) or 0),
         )
 
 
@@ -111,6 +120,53 @@ def run_agent_turn(
 
 
 def _run_locked(agent, request_body: RequestBody, observer: TurnObserver | None) -> ChatResult:
+    # An answer that is tool-call markup gets one more try from the same
+    # history (issue #24, cause unknown); both tries are paid for.
+    input_tokens = output_tokens = 0
+    for attempt in range(2):
+        reasoning, answer, usage = _ask(agent, request_body)
+        input_tokens += int(usage.get("inputTokens", 0) or 0)
+        output_tokens += int(usage.get("outputTokens", 0) or 0)
+        if not has_tool_call_markup(answer):
+            break
+        debug(f"[Agent] answer was tool-call markup (try {attempt + 1}): {answer[:200]!r}")
+    else:
+        return ChatResult(
+            answer=MARKUP_ANSWER,
+            reasoning="",
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            status="error",
+            warnings=[MARKUP_WARNING],
+            markup_retries=1,
+        )
+
+    results = observer.results if observer is not None else []
+    summary = summarize(results)
+    # What the user asked is not new; what an earlier answer said is not
+    # evidence either: earlier turns count through the numbers their queries
+    # returned, which the browser sends back (earlier_turn_values).
+    asked = [
+        part.text
+        for message in request_body.messages
+        if message.role == "user"
+        for part in message.text_parts()
+    ]
+    return ChatResult(
+        answer=answer or EMPTY_ANSWER,
+        reasoning=reasoning,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        unverified_numbers=unverified_numbers(
+            answer, results, asked, earlier_values=earlier_turn_values(request_body)
+        ),
+        markup_retries=attempt,
+        **summary,
+    )
+
+
+def _ask(agent, request_body: RequestBody) -> tuple[str, str, dict]:
+    """One run of the agent on the restored history: (reasoning, answer, usage)."""
     agent.messages.clear()
     agent.messages.extend(request_body_to_agent_history(request_body))
     before = len(agent.messages)
@@ -127,27 +183,7 @@ def _run_locked(agent, request_body: RequestBody, observer: TurnObserver | None)
     usage = invocations[-1].usage if invocations else {}
 
     reasoning, answer = parse_agent_response(agent.messages, before)
-    results = observer.results if observer is not None else []
-    summary = summarize(results)
-    # What the user asked is not new; what an earlier answer said is not
-    # evidence either: earlier turns count through the numbers their queries
-    # returned, which the browser sends back (earlier_turn_values).
-    asked = [
-        part.text
-        for message in request_body.messages
-        if message.role == "user"
-        for part in message.text_parts()
-    ]
-    return ChatResult(
-        answer=answer or EMPTY_ANSWER,
-        reasoning=reasoning,
-        input_tokens=int(usage.get("inputTokens", 0) or 0),
-        output_tokens=int(usage.get("outputTokens", 0) or 0),
-        unverified_numbers=unverified_numbers(
-            answer, results, asked, earlier_values=earlier_turn_values(request_body)
-        ),
-        **summary,
-    )
+    return reasoning, answer, usage
 
 
 async def relay(run: T.Callable[[Listener], ChatResult]) -> T.AsyncIterator[tuple[str, T.Any]]:

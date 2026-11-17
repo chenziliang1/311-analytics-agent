@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 
 from agent_app.agentcore_app import build_app
 from agent_app.aws_auth import SigV4Auth, agentcore_invocation_url, load_secrets_into_env
-from agent_app.chat import ChatResult, invoke_remote_turn, runtime_session_id
+from agent_app.chat import MARKUP_ANSWER, ChatResult, invoke_remote_turn, run_agent_turn, runtime_session_id
 from agent_app.metrics import Metrics, NoMetrics, query_metrics_sink
 
 BODY = {
@@ -34,6 +34,27 @@ class FakeAgent:
     def __call__(self, text):
         self.asked.append(text)
         self.messages.append({"role": "assistant", "content": [{"text": "There are 3 widgets."}]})
+        usage = {"inputTokens": 120, "outputTokens": 30}
+        return types.SimpleNamespace(
+            metrics=types.SimpleNamespace(agent_invocations=[types.SimpleNamespace(usage=usage)])
+        )
+
+
+MARKUP = '<invoke name="warehouse_query"> <parameter name="question">How many widgets?</parameter> </invoke>'
+
+
+class ScriptedAgent(FakeAgent):
+    """Answers each run with the next of ``answers``, and records the history it started from."""
+
+    def __init__(self, *answers):
+        super().__init__()
+        self.answers = list(answers)
+        self.histories = []
+
+    def __call__(self, text):
+        self.histories.append(list(self.messages))
+        self.asked.append(text)
+        self.messages.append({"role": "assistant", "content": [{"text": self.answers.pop(0)}]})
         usage = {"inputTokens": 120, "outputTokens": 30}
         return types.SimpleNamespace(
             metrics=types.SimpleNamespace(agent_invocations=[types.SimpleNamespace(usage=usage)])
@@ -63,6 +84,48 @@ def test_invocations_runs_a_turn_and_reports_metrics():
     assert names[:2] == ["ColdStartTurns", "Turns"]
     client.post("/invocations", json=BODY)
     assert [n for n, _ in metrics.points].count("ColdStartTurns") == 1
+
+
+def test_an_answer_written_as_tool_call_markup_runs_once_more_from_the_same_history():
+    from agent_app.vendor.vercel_ai_sdk import RequestBody
+
+    body = RequestBody(
+        id="chat-1",
+        messages=[
+            {"id": "u0", "role": "user", "parts": [{"type": "text", "text": "Hello"}]},
+            {"id": "a0", "role": "assistant", "parts": [{"type": "text", "text": "Hi."}]},
+            *BODY["messages"],
+        ],
+    )
+    agent = ScriptedAgent(MARKUP, "There are 3 widgets.")
+    result = run_agent_turn(agent, body)
+    assert result.answer == "There are 3 widgets."
+    assert (result.status, result.markup_retries) == ("ok", 1)
+    assert agent.asked == ["How many widgets?", "How many widgets?"]
+    # The second run starts from the browser's history, not from the first run's reply.
+    assert agent.histories[0] == agent.histories[1] and len(agent.histories[1]) == 2
+    # Both runs were paid for.
+    assert (result.input_tokens, result.output_tokens) == (240, 60)
+
+
+def test_markup_twice_is_a_failed_turn_with_no_markup_in_it():
+    agent, metrics = ScriptedAgent(MARKUP, "Sure. " + MARKUP), RecordingMetrics()
+    reply = TestClient(build_app(lambda: agent, metrics)).post("/invocations", json=BODY).json()
+    assert reply["answer"] == MARKUP_ANSWER
+    assert reply["status"] == "error"
+    assert "could not be produced" in reply["warnings"][0]
+    assert "invoke" not in json.dumps(reply).lower()
+    assert len(agent.asked) == 2
+    assert ("MarkupAnswerRetries", 1) in metrics.points
+
+
+def test_an_answer_that_says_invoke_in_prose_is_not_run_again():
+    agent, metrics = ScriptedAgent("Each invoke of the press made 3 widgets."), RecordingMetrics()
+    reply = TestClient(build_app(lambda: agent, metrics)).post("/invocations", json=BODY).json()
+    assert reply["answer"] == "Each invoke of the press made 3 widgets."
+    assert (reply["status"], reply["markup_retries"]) == ("ok", 0)
+    assert len(agent.asked) == 1
+    assert ("MarkupAnswerRetries", 0) in metrics.points
 
 
 def test_invocations_rejects_a_body_without_a_question():

@@ -132,6 +132,8 @@ def build_app(agent_factory=None, metrics=None, feedback_recorder=None, source_r
             # so the level means little; a jump after a model or prompt change
             # is the signal.
             m.put("UnverifiedNumberTurns", 1 if result.unverified_numbers else 0)
+            # Turns whose answer was tool-call markup and ran again (issue #24).
+            m.put("MarkupAnswerRetries", result.markup_retries)
 
         started = time.monotonic()
         if "text/event-stream" not in request.headers.get("accept", ""):
