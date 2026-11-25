@@ -6,7 +6,7 @@ The guard against a fictional widget shop, never this dataset's tables.
 
 import pytest
 
-from agent_app.sql_guard import guard_select
+from agent_app.sql_guard import _BLOCKED_FUNCTIONS, guard_select
 
 TABLES = {"widget", "owner", "part"}
 SENSITIVE = {"owner.full_name", "owner.email"}
@@ -58,6 +58,54 @@ def test_blocked(sql, reason):
 )
 def test_only_mistakes_are_repairable(sql, repairable):
     assert guard(sql).repairable is repairable
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        # Statements sqlglot has no tree for come back as a Command, which is
+        # not a SELECT whatever it would have done.
+        "CALL drop_everything()",
+        "EXPLAIN SELECT id FROM widget",
+        "SHOW TABLES",
+        "VACUUM widget",
+        "EXECUTE IMMEDIATE 'DROP TABLE widget'",
+        "LOCK TABLE widget",
+        # And the ones it does parse.
+        "DROP TABLE widget",
+        "TRUNCATE TABLE widget",
+        "CREATE TABLE copied AS SELECT * FROM widget",
+        "ALTER TABLE widget ADD COLUMN c INT",
+        "INSERT INTO widget SELECT * FROM widget",
+        "MERGE INTO widget USING part ON widget.id = part.id WHEN MATCHED THEN DELETE",
+        "COPY widget TO '/tmp/widget.csv'",
+        "GRANT SELECT ON widget TO PUBLIC",
+        "SET search_path TO other",
+        "BEGIN",
+        "COMMIT",
+    ],
+)
+def test_anything_but_a_select_is_refused_and_not_retried(sql):
+    result = guard(sql)
+    assert result.blocked
+    assert "only SELECT" in result.blocked_reason
+    assert not result.repairable
+
+
+@pytest.mark.parametrize("name", sorted(_BLOCKED_FUNCTIONS))
+@pytest.mark.parametrize(
+    "template",
+    [
+        "SELECT {f}()",
+        "SELECT id FROM widget WHERE {f}() IS NULL",
+        "WITH x AS (SELECT {f}() AS v) SELECT v FROM x",
+    ],
+)
+def test_every_blocked_function_is_refused_wherever_it_appears(name, template):
+    result = guard(template.format(f=name))
+    assert result.blocked
+    assert f"function {name} is not allowed" in result.blocked_reason
+    assert not result.repairable
 
 
 def test_root_personal_data_column_is_removed_with_a_warning():
