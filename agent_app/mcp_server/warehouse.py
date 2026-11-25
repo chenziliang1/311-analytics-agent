@@ -214,6 +214,16 @@ def run_as_for(deps: WarehouseDeps, user_id: str | None) -> tuple[dict, str | No
     return run_as, None
 
 
+#: How much of a rejection or error each audited attempt keeps: enough to
+#: tell one from another, not a database's whole stack of context.
+_ATTEMPT_REASON_CHARS = 300
+
+
+def _attempt(kind: str, reason: str | None) -> dict:
+    """One retried attempt for the audit log; its SQL is left out."""
+    return {"kind": kind, "reason": (reason or "")[:_ATTEMPT_REASON_CHARS]}
+
+
 def answer(
     deps: WarehouseDeps,
     intent: str,
@@ -249,6 +259,9 @@ def answer(
         for s in cited_sources(deps.registry, match)
     ]
     warnings = []
+    # One entry per attempt the call went on from: without it a query the
+    # guard refused and the writer then fixed is logged as a plain ok.
+    attempts: list[dict] = []
     if any(d.sensitive for d in match.dimensions):
         warnings.append("Residents' personal data cannot be shown; it was left out.")
 
@@ -267,6 +280,7 @@ def answer(
                 "metrics": [m.name for m in match.metrics],
                 "unresolved_names": unresolved,
                 "status": output.status,
+                "attempts": list(attempts),
                 "path": output.path,
                 "sql": output.sql,
                 "row_count": output.row_count,
@@ -358,6 +372,7 @@ def answer(
             # A typo, not a boundary: same one repair a database error gets.
             repairs += 1
             previous_sql, previous_error = reply.sql, f"Refused: {guarded.blocked_reason}"
+            attempts.append(_attempt("guard", guarded.blocked_reason))
             continue
         unread = _unread_term_tables(match, guarded.tables) if not guarded.blocked else []
         if unread:
@@ -373,6 +388,7 @@ def answer(
                     f"and this query does not read it. Rewrite it to read {table}."
                     for term, table in unread
                 )
+                attempts.append(_attempt("unread_table", previous_error))
                 continue
             term, table = unread[0]
             return finish(WarehouseQueryOutput(
@@ -398,6 +414,7 @@ def answer(
         if result.transient:
             # The connection dropped, not the query: the same SQL, once more.
             # No writer call -- there is nothing for it to fix.
+            attempts.append(_attempt("transient", result.error))
             result = fetch_rows(deps.engine, guarded.sql, deps.max_rows, deps.timeout_seconds, **run_as)
         if result.timed_out:
             return finish(WarehouseQueryOutput(
@@ -418,6 +435,7 @@ def answer(
             # once it sees the database's sentence.
             db_retries += 1
             previous_sql, previous_error = guarded.sql, result.error
+            attempts.append(_attempt("db_error", result.error))
             continue
         if result.error:
             break
