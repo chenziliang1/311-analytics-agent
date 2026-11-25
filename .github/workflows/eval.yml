@@ -1,6 +1,7 @@
 # The golden-set eval, run by hand: Actions -> eval -> Run workflow, or
 # `gh workflow run eval.yml`. Never on a schedule or a pull request: each run
-# is about $3 of model calls.
+# is about $3 of model calls. Pull requests that touch the agent get eight of
+# the cases instead (eval-pr.yml).
 #
 # Spends real money and reads the real warehouse, so it needs two repository
 # secrets: ANTHROPIC_API_KEY, and SNOWFLAKE_PRIVATE_KEY (the PEM text of

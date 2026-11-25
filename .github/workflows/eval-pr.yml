@@ -1,0 +1,100 @@
+# A slice of the golden-set eval on pull requests that change what the agent
+# says: its code, its prompts, the semantic layer, the model it is set to, or
+# the golden cases themselves. Eight cases, sixteen runs, no judge: about
+# fifty cents of model calls a push, against $3 for the full set (eval.yml),
+# which stays a run by hand.
+#
+# The unit tests in ci.yml never call a model, so a prompt change that makes
+# answers worse passes them. This is the check that would not.
+#
+# Needs the same two repository secrets as eval.yml. A pull request from a
+# fork is given neither, so there the job says so and passes.
+name: eval-subset
+
+on:
+  pull_request:
+    paths:
+      - "agent_app/**"
+      - "data/system-prompt.md"
+      - "data/sql-writer-prompt.md"
+      - "data/business-context.md"
+      - "data/semantic_layer/**"
+      - "data/eval/golden_cases.yml"
+      - ".env.defaults"
+      - "uv.lock"
+      - ".github/workflows/eval-pr.yml"
+
+# A second push to the same pull request stops the run the first one started.
+concurrency:
+  group: eval-subset-${{ github.ref }}
+  cancel-in-progress: true
+
+# Nothing is committed: data/eval/results.md records full runs only.
+permissions:
+  contents: read
+
+jobs:
+  grade:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      SNOWFLAKE_PRIVATE_KEY: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
+      FAST_PATH: "true"
+      # Two the fast path compiles (P), three for the SQL writer (G, one of
+      # them a ranked top three), two follow-up questions (M) and the case a
+      # thumbs-down became (F). Each has matched its reference in every full
+      # run recorded in data/eval/results.md, so a miss here is the change and
+      # not the case.
+      CASES: "P01,P03,G10,G14,G19,M02,M07,F-b3cd1d94"
+    steps:
+      - name: Check the secrets are set
+        id: secrets
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ] || [ -z "$SNOWFLAKE_PRIVATE_KEY" ]; then
+            echo "::notice::ANTHROPIC_API_KEY or SNOWFLAKE_PRIVATE_KEY is not set; skipping the eval."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v7
+        if: steps.secrets.outputs.run == 'true'
+      - uses: astral-sh/setup-uv@v10.3.0
+        if: steps.secrets.outputs.run == 'true'
+        with:
+          python-version: "3.12"
+      - name: Install
+        if: steps.secrets.outputs.run == 'true'
+        run: uv sync --locked
+      - name: Grade
+        if: steps.secrets.outputs.run == 'true'
+        # The command exits 1 when any of the five release scores misses,
+        # which sixteen runs cannot carry: their p95 is their slowest run, and
+        # the first run of a job pays for building the agent. So its exit code
+        # is dropped behind the pipe, and the next step decides.
+        run: .venv/bin/agent-app grade --nojudge --cases "$CASES" 2>&1 | tee grade.log
+      - name: Gate on result matching
+        if: steps.secrets.outputs.run == 'true'
+        # The full run's own threshold, read from the report: at 90%, one miss
+        # in sixteen passes and two fail. A run that errored counts as a miss,
+        # and a subset that selects no case has no rate, which fails.
+        run: |
+          report=$(ls tmp/eval/*.json)
+          jq -e '.metrics.sql_accuracy != null and .metrics.sql_accuracy >= .thresholds.sql_accuracy' "$report" > /dev/null \
+            || { echo "::error::Result matching is below its threshold; see the summary."; exit 1; }
+      - name: Summary
+        if: always() && steps.secrets.outputs.run == 'true'
+        run: |
+          {
+            echo '## Golden-set eval, pull request subset'
+            echo '```'
+            sed -n '/ runs, /,/^Report:/p' grade.log
+            echo '```'
+            echo 'Only sql_accuracy decides this check. Latency and citation are shown, not gated.'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        if: always() && steps.secrets.outputs.run == 'true'
+        with:
+          name: eval-subset-report
+          path: tmp/eval/*.json
+          if-no-files-found: ignore
