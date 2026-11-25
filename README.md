@@ -35,7 +35,7 @@ Browser (Next.js on Vercel) -> agent runtime (AgentCore) -> MCP tools runtime (A
 - **Agent:** Strands Agents with Claude Sonnet on AWS Bedrock AgentCore. It interprets the question and words the answer.
 - **Tools:** a separate MCP server, also on AgentCore. `warehouse_query` goes from semantic layer to SQL writer to guard to Snowflake to audit log.
 - **Infrastructure:** AWS CDK, Secrets Manager, and a CloudWatch dashboard with alarms.
-- **Quality loop:** a golden-set eval (35 cases, 70 runs: 97.1% SQL accuracy, 0 hallucinations observed across the 70 runs, 94.8% of answers citing the definition they rest on, p95 13.4 s; every run is a row in [`data/eval/results.md`](data/eval/results.md)), tests on every push and the eval on demand, a morning canary against the live agent, and thumbs-downs that become new test cases.
+- **Quality loop:** a golden-set eval (35 cases, 70 runs: 97.1% SQL accuracy, 0 hallucinations observed across the 70 runs, 94.8% of answers citing the definition they rest on, p95 13.4 s; every run is a row in [`data/eval/results.md`](data/eval/results.md)), tests on every push, eight of the eval's cases on pull requests that touch the agent and the full eval on demand, a morning canary against the live agent, and thumbs-downs that become new test cases.
 
 The decision I would make again: **the agent never writes SQL.** A dedicated writer model does, and it sees the semantic layer's definition and a reference query for every metric the question names. Each number therefore has exactly one definition, and the agent can stay focused on understanding the user.
 
