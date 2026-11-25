@@ -659,6 +659,45 @@ class TestTenantScope:
         answer(deps, "how many widgets", user_id="bo")
         assert fetches == [(None, None)]
 
+    def test_a_compiled_query_runs_as_the_users_role_too(self, engine, registry, fetches):
+        """The fast path skips the writer, not the role."""
+        writer = ScriptedWriter()
+        log = []
+        deps = dataclasses.replace(
+            self.scoped_deps(engine, registry, writer, log, user_roles={"ada": "SHOP_PLANT_NORTH"}),
+            fast_path=True,
+        )
+        out = answer(deps, "defect rate by line in the first quarter", user_id="ada")
+        assert out.status == "ok" and out.path == "compiled"
+        assert writer.requests == []
+        assert fetches == [("SHOP_PLANT_NORTH", "SHOP_RO")]
+        assert (log[0]["path"], log[0]["query_role"]) == ("compiled", "SHOP_PLANT_NORTH")
+
+    def test_a_compiled_query_that_fails_falls_back_to_the_writer_under_the_same_role(
+        self, engine, registry, fetches, monkeypatch
+    ):
+        """The writer's second try is still the user's query, never the service role's."""
+        from agent_app.mcp_server import warehouse
+        from agent_app.sql_utils import QueryRows
+
+        def fake(engine, sql, max_rows, timeout_seconds=None, role=None, restore_role=None):
+            fetches.append((role, restore_role))
+            if "w.line_code" in sql:
+                return QueryRows([], [], False, error="compiled query failed")
+            return QueryRows(["n"], [[3]], False)
+
+        monkeypatch.setattr(warehouse, "fetch_rows", fake)
+        writer = ScriptedWriter(sql("SELECT line_code, AVG(is_defective) AS defect_rate FROM widget GROUP BY line_code"))
+        log = []
+        deps = dataclasses.replace(
+            self.scoped_deps(engine, registry, writer, log, user_roles={"ada": "SHOP_PLANT_NORTH"}),
+            fast_path=True,
+        )
+        out = answer(deps, "defect rate by line in the first quarter", user_id="ada")
+        assert out.status == "ok" and out.path == "writer" and len(writer.requests) == 1
+        assert fetches == [("SHOP_PLANT_NORTH", "SHOP_RO")] * 2
+        assert log[0]["query_role"] == "SHOP_PLANT_NORTH"
+
     def test_an_unknown_user_is_refused_before_any_sql_is_written(self, engine, registry, fetches):
         writer = ScriptedWriter(sql("SELECT COUNT(*) AS n FROM widget"))
         log = []
