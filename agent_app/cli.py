@@ -18,6 +18,7 @@ step with it.
 
     agent-app check-content
     agent-app check-content --retired "patient,bed,ward"
+    agent-app check-tenant-roles
     agent-app test-db-conn
     agent-app print-db-schema
 """
@@ -187,6 +188,43 @@ class Cli:
         for row in rows:
             print(f"  {row[0]:28s} {row[1]:4s} {row[3]}  {row[4] or ''}  {row[2] or ''}")
         raise SystemExit(0)
+
+    def check_tenant_roles(self) -> None:
+        """
+        Ask each role tenant scope maps users to (TENANT_ROLE_MAP, the role
+        table, TENANT_DEFAULT_ROLE) how many tenants it sees, before a user
+        finds out by asking.
+
+        Fails on a role the service user cannot take, a role that sees no
+        tenant (the row access policy has nothing for it), and any role but
+        the service role's own that sees every tenant. With scoping off, the
+        deployed default, it checks nothing and exits 0. Read-only.
+        """
+        from agent_app.api import one
+        from agent_app.tenant_check import check_tenant_roles, render
+
+        access = one.config.tenant_access
+        table_errors = []
+        if one.config.tenant_role_table:
+            import dataclasses
+
+            from agent_app.mcp_server.warehouse import role_table_source
+            from agent_app.tenant_access import RoleDirectory
+
+            # Read as the service does, but a failed read is this check's failure.
+            access = dataclasses.replace(
+                access,
+                user_roles=RoleDirectory(
+                    role_table_source(one.engine, one.config.tenant_role_table),
+                    overrides=one.config.tenant_role_map,
+                    on_error=table_errors.append,
+                ),
+            )
+        report = check_tenant_roles(one.engine if access.enabled else None, access)
+        print(render(report, access.internal_role))
+        for e in table_errors:
+            print(f"FAIL  {e}; only TENANT_ROLE_MAP and the default were checked")
+        raise SystemExit(0 if report.ok and not table_errors else 1)
 
     def test_db_conn(self) -> None:
         """
